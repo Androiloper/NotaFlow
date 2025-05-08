@@ -1,3 +1,4 @@
+// ui/navigation/AppNavigation.kt
 package com.example.notaflow.ui.navigation
 
 import androidx.compose.runtime.Composable
@@ -7,6 +8,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.notaflow.ui.screens.home.HomePage
 import com.example.notaflow.ui.screens.noteedit.NoteEditScreen
 import com.example.notaflow.ui.screens.notelist.NoteListScreen
 import com.example.notaflow.ui.screens.settings.SettingsScreen
@@ -17,8 +19,25 @@ fun AppNavigation(
 ) {
     NavHost(
         navController = navController,
-        startDestination = Screen.NoteList.route
+        startDestination = Screen.Home.route
     ) {
+        composable(Screen.Home.route) {
+            HomePage(
+                onNavigateToNotes = {
+                    navController.navigate(Screen.NoteList.route) {
+                        // Pop up to the start destination of the graph to
+                        // avoid building up a large stack of destinations
+                        popUpTo(Screen.Home.route) { saveState = true }
+                        // Avoid multiple copies of the same destination when
+                        // reselecting the same item
+                        launchSingleTop = true
+                        // Restore state when reselecting a previously selected item
+                        restoreState = true
+                    }
+                }
+            )
+        }
+
         composable(Screen.NoteList.route) {
             NoteListScreen(
                 onNoteClick = { noteId ->
@@ -29,6 +48,13 @@ fun AppNavigation(
                 },
                 onSettingsClick = {
                     navController.navigate(Screen.Settings.route)
+                },
+                onNavigateToHome = {
+                    navController.navigate(Screen.Home.route) {
+                        // Pop up to the start destination of the graph to
+                        // avoid building up a large stack of destinations
+                        popUpTo(Screen.Home.route) { inclusive = true }
+                    }
                 }
             )
         }
