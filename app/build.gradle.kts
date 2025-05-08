@@ -110,4 +110,7 @@ dependencies {
 
     // Mockito
     testImplementation("org.mockito:mockito-core:5.7.0")
+
+    // Timber for logging
+    implementation("com.jakewharton.timber:timber:5.0.1")
 }

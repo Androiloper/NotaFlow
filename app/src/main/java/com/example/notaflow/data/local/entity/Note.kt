@@ -1,3 +1,4 @@
+// data/local/entity/Note.kt
 package com.example.notaflow.data.local.entity
 
 import androidx.room.Entity
@@ -12,5 +13,9 @@ data class Note(
     val content: String,
     val colorHex: String = "#FFFFFF", // Default white color
     val createdAt: Date = Date(),
-    val modifiedAt: Date = Date()
+    val modifiedAt: Date = Date(),
+    // New field for soft delete
+    val isDeleted: Boolean = false,
+    // Timestamp for when the note was marked as deleted
+    val deletedAt: Date? = null
 )

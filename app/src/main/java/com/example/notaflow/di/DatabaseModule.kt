@@ -20,11 +20,8 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
-        return Room.databaseBuilder(
-            context,
-            AppDatabase::class.java,
-            "nota_flow_db"
-        ).build()
+        // Use the factory method with migrations instead of direct builder
+        return AppDatabase.buildDatabase(context)
     }
 
     @Provides

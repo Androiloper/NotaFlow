@@ -1,7 +1,14 @@
+// di/DomainModule.kt
 package com.example.notaflow.di
 
 import com.example.notaflow.data.repository.NoteRepository
-import com.example.notaflow.domain.usecase.*
+import com.example.notaflow.domain.usecase.DeleteNoteUseCase
+import com.example.notaflow.domain.usecase.GetNoteByIdUseCase
+import com.example.notaflow.domain.usecase.GetNotesUseCase
+import com.example.notaflow.domain.usecase.RestoreNoteUseCase
+import com.example.notaflow.domain.usecase.SaveNoteUseCase
+import com.example.notaflow.domain.usecase.SearchNotesUseCase
+import com.example.notaflow.domain.usecase.SoftDeleteNoteUseCase
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -34,5 +41,15 @@ object DomainModule {
     @Provides
     fun provideDeleteNoteUseCase(repository: NoteRepository): DeleteNoteUseCase {
         return DeleteNoteUseCase(repository)
+    }
+
+    @Provides
+    fun provideSoftDeleteNoteUseCase(repository: NoteRepository): SoftDeleteNoteUseCase {
+        return SoftDeleteNoteUseCase(repository)
+    }
+
+    @Provides
+    fun provideRestoreNoteUseCase(repository: NoteRepository): RestoreNoteUseCase {
+        return RestoreNoteUseCase(repository)
     }
 }

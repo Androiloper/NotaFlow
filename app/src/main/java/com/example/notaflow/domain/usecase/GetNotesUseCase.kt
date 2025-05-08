@@ -9,6 +9,7 @@ class GetNotesUseCase @Inject constructor(
     private val repository: NoteRepository
 ) {
     operator fun invoke(): Flow<List<Note>> {
-        return repository.getAllNotes()
+        // Only returns active (non-deleted) notes
+        return repository.getAllActiveNotes()
     }
 }
