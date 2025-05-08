@@ -1,3 +1,4 @@
+// ui/screens/notelist/NoteListScreen.kt (updated with home button)
 package com.example.notaflow.ui.screens.notelist
 
 import androidx.compose.animation.AnimatedVisibility
@@ -14,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
@@ -51,6 +53,7 @@ fun NoteListScreen(
     onNoteClick: (Long) -> Unit,
     onNewNoteClick: () -> Unit,
     onSettingsClick: () -> Unit,
+    onNavigateToHome: () -> Unit = {}, // New parameter for home navigation
     viewModel: NoteListViewModel = hiltViewModel()
 ) {
     val notes by viewModel.notes.collectAsState()
@@ -66,6 +69,15 @@ fun NoteListScreen(
                 title = {
                     if (!isSearchActive) {
                         Text("NotaFlow")
+                    }
+                },
+                navigationIcon = {
+                    // Home button
+                    IconButton(onClick = onNavigateToHome) {
+                        Icon(
+                            imageVector = Icons.Default.Home,
+                            contentDescription = "Go to Home"
+                        )
                     }
                 },
                 actions = {

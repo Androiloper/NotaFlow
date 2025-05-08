@@ -1,6 +1,7 @@
 package com.example.notaflow.ui.navigation
 
 sealed class Screen(val route: String) {
+    object Home : Screen("home")
     object NoteList : Screen("note_list")
     object NoteEdit : Screen("note_edit?noteId={noteId}") {
         fun createRoute(noteId: Long? = null): String {
