@@ -17,5 +17,9 @@ data class Note(
     // New field for soft delete
     val isDeleted: Boolean = false,
     // Timestamp for when the note was marked as deleted
-    val deletedAt: Date? = null
+    val deletedAt: Date? = null,
+    // New field for rich text content
+    val isRichText: Boolean = false,
+    // This will store the markdown representation of the rich text
+    val richTextContent: String = ""
 )

@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
@@ -39,15 +41,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.notaflow.data.local.entity.Note
+import com.example.notaflow.ui.components.RichTextDisplay
 import com.example.notaflow.utils.HapticFeedback
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
 import androidx.compose.foundation.ExperimentalFoundationApi
 
 @Composable
@@ -193,6 +197,7 @@ private fun NoteCard(
                     .fillMaxWidth()
                     .padding(16.dp)
             ) {
+                // Title
                 Text(
                     text = note.title.ifEmpty { "Untitled" },
                     style = MaterialTheme.typography.titleMedium,
@@ -202,15 +207,51 @@ private fun NoteCard(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Text(
-                    text = note.content.ifEmpty { "No content" },
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis
-                )
+                // Rich text indicator if applicable
+                if (note.isRichText) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    ) {
+                        // Custom rich text indicator that doesn't rely on Material icons
+                        RichTextIndicator()
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Rich Text",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
+                // Content - show either plain text or rich text preview
+                if (note.isRichText && note.richTextContent.isNotEmpty()) {
+                    // Rich text preview - simplified for list view
+                    val previewContent = if (note.richTextContent.length > 100)
+                        note.richTextContent.substring(0, 100) + "..."
+                    else
+                        note.richTextContent
+
+                    // Display simplified version of rich text
+                    RichTextDisplay(
+                        markdownContent = previewContent,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(60.dp)
+                    )
+                } else {
+                    // Plain text content
+                    Text(
+                        text = note.content.ifEmpty { "No content" },
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(8.dp))
 
+                // Last modified date
                 Text(
                     text = "Last modified: ${formatDate(note.modifiedAt)}",
                     style = MaterialTheme.typography.labelMedium,
@@ -218,6 +259,26 @@ private fun NoteCard(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun RichTextIndicator(modifier: Modifier = Modifier) {
+    // A simple "T" in a circle to indicate rich text - no icon dependency
+    Box(
+        modifier = modifier
+            .size(16.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+            .border(1.dp, MaterialTheme.colorScheme.primary, CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "T",
+            color = MaterialTheme.colorScheme.primary,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 

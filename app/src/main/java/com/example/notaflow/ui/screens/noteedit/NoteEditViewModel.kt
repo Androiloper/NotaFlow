@@ -9,6 +9,7 @@ import com.example.notaflow.data.local.entity.Note
 import com.example.notaflow.domain.usecase.GetNoteByIdUseCase
 import com.example.notaflow.domain.usecase.SaveNoteUseCase
 import com.example.notaflow.ui.theme.NoteColors
+import com.example.notaflow.utils.RichTextFormatter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -44,9 +45,11 @@ class NoteEditViewModel @Inject constructor(
                 _state.value = _state.value.copy(
                     noteId = note.id,
                     title = note.title,
-                    content = note.content,
+                    content = if (note.isRichText) RichTextFormatter.stripMarkdown(note.richTextContent) else note.content,
                     colorHex = note.colorHex,
-                    isNewNote = false
+                    isNewNote = false,
+                    isRichText = note.isRichText,
+                    richTextContent = note.richTextContent
                 )
             }
         }
@@ -60,8 +63,30 @@ class NoteEditViewModel @Inject constructor(
         _state.value = _state.value.copy(content = content)
     }
 
+    fun onRichTextContentChange(richTextContent: String) {
+        _state.value = _state.value.copy(richTextContent = richTextContent)
+    }
+
     fun onColorSelect(colorHex: String) {
         _state.value = _state.value.copy(colorHex = colorHex)
+    }
+
+    fun setRichTextEnabled(enabled: Boolean) {
+        val currentState = _state.value
+
+        // If turning on rich text from plain text, convert the existing content
+        // to markdown to preserve it
+        val richTextContent = if (enabled && currentState.richTextContent.isBlank()) {
+            // Simply use the content as-is initially
+            currentState.content
+        } else {
+            currentState.richTextContent
+        }
+
+        _state.value = currentState.copy(
+            isRichText = enabled,
+            richTextContent = richTextContent
+        )
     }
 
     fun saveNote(): Boolean {
@@ -80,13 +105,25 @@ class NoteEditViewModel @Inject constructor(
             _state.value = currentState.copy(isSaving = true, error = null)
 
             try {
+                // Prepare content based on whether rich text is enabled
+                val finalContent = if (currentState.isRichText) {
+                    // For rich text, we'll store the plain content in the regular content field
+                    // and the markdown in the richTextContent field
+                    RichTextFormatter.stripMarkdown(currentState.richTextContent)
+                } else {
+                    currentState.content
+                }
+
                 val note = Note(
                     id = currentState.noteId,
                     title = currentState.title,
-                    content = currentState.content,
+                    content = finalContent,
                     colorHex = currentState.colorHex,
-                    modifiedAt = Date()
-                    // createdAt will default to now for new notes or keep existing for updates
+                    modifiedAt = Date(),
+                    isRichText = currentState.isRichText,
+                    richTextContent = if (currentState.isRichText)
+                        RichTextFormatter.enhanceMarkdown(currentState.richTextContent)
+                    else ""
                 )
 
                 saveNoteUseCase(note)

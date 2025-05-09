@@ -6,6 +6,7 @@ import com.example.notaflow.data.local.AppDatabase
 import com.example.notaflow.data.local.dao.NoteDao
 import com.example.notaflow.data.repository.NoteRepository
 import com.example.notaflow.data.repository.NoteRepositoryImpl
+import com.example.notaflow.utils.RichTextConverter
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -27,6 +28,12 @@ object DatabaseModule {
     @Provides
     fun provideNoteDao(appDatabase: AppDatabase): NoteDao {
         return appDatabase.noteDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideRichTextConverter(): RichTextConverter {
+        return RichTextConverter()
     }
 
     @Provides

@@ -10,9 +10,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.notaflow.data.local.dao.NoteDao
 import com.example.notaflow.data.local.entity.Note
 import com.example.notaflow.utils.DateConverter
+import com.example.notaflow.utils.RichTextConverter
 
-// Increase version number from 1 to 2
-@Database(entities = [Note::class], version = 2, exportSchema = true)
+// Increase version number from 2 to 3 for rich text support
+@Database(entities = [Note::class], version = 3, exportSchema = true)
 @TypeConverters(DateConverter::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun noteDao(): NoteDao
@@ -27,6 +28,15 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // Migration from version 2 to 3 for rich text support
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // Add rich text columns to the notes table
+                database.execSQL("ALTER TABLE notes ADD COLUMN isRichText INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE notes ADD COLUMN richTextContent TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         // Factory method to create the database with migrations
         fun buildDatabase(context: Context): AppDatabase {
             return Room.databaseBuilder(
@@ -34,7 +44,7 @@ abstract class AppDatabase : RoomDatabase() {
                 AppDatabase::class.java,
                 "nota_flow_db"
             )
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
         }
     }
