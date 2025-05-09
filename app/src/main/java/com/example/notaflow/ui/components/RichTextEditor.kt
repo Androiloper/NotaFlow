@@ -1,391 +1,584 @@
 package com.example.notaflow.ui.components
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+// import androidx.compose.foundation.layout.Spacer // Not used directly in this version
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+// import androidx.compose.foundation.layout.size // Not used directly in this version
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Divider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.notaflow.ui.components.TextStyle as FormatStyle
 
 /**
- * A rich text editor component that supports formatting
+ * True WYSIWYG rich text editor that shows formatting as you type.
+ * The editor's content is Markdown.
  */
 @Composable
 fun RichTextEditor(
     initialContent: String,
-    onContentChanged: (String, String) -> Unit, // (plainText, markdownText)
+    onMarkdownChanged: (String) -> Unit,
     modifier: Modifier = Modifier,
     showToolbar: Boolean = true,
-    readOnly: Boolean = false
+    readOnly: Boolean = false,
+    placeholderText: String = "Start typing here..."
 ) {
     val hapticFeedback = LocalHapticFeedback.current
     val focusRequester = remember { FocusRequester() }
-    val scrollState = rememberScrollState()
+    val editorScrollState = rememberScrollState()
+    val focusManager = LocalFocusManager.current
 
-    // Text selection colors
     val customTextSelectionColors = TextSelectionColors(
         handleColor = MaterialTheme.colorScheme.primary,
         backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
     )
 
-    // State for tracking the text and selection
     var textFieldValue by rememberSaveable(stateSaver = TextFieldValue.Saver) {
-        mutableStateOf(TextFieldValue(initialContent))
+        mutableStateOf(TextFieldValue(initialContent, selection = TextRange(initialContent.length)))
     }
 
-    // State for tracking the formatted content as Markdown
-    var markdownContent by rememberSaveable { mutableStateOf("") }
+    var activeFormats by remember { mutableStateOf(setOf<FormatStyle>()) }
 
-    // Remember the last selection position
-    var lastSelectionRange by remember { mutableStateOf(TextRange.Zero) }
+    // Define colors for the transformation based on the current theme
+    val transformationColors = RichTextTransformation.Colors(
+        h1 = MaterialTheme.colorScheme.primary,
+        h2 = MaterialTheme.colorScheme.secondary,
+        h3 = MaterialTheme.colorScheme.tertiary,
+        quoteBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        quoteBorder = MaterialTheme.colorScheme.outlineVariant,
+        list = MaterialTheme.colorScheme.tertiary,
+        link = MaterialTheme.colorScheme.primary,
+        codeBackground = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
+        codeText = MaterialTheme.colorScheme.onSurfaceVariant
+    )
 
-    // Update last selection when text field selection changes
-    if (textFieldValue.selection != lastSelectionRange) {
-        lastSelectionRange = textFieldValue.selection
+    val richTextTransformation = remember(transformationColors) {
+        RichTextTransformation(transformationColors)
+    }
+
+    val applyFormatting = { style: FormatStyle ->
+        hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        val selection = textFieldValue.selection
+        if (!selection.collapsed) {
+            val selectedText = textFieldValue.text.substring(selection.start, selection.end)
+            val prefix = textFieldValue.text.substring(0, selection.start)
+            val suffix = textFieldValue.text.substring(selection.end)
+
+            if (style == FormatStyle.NORMAL) {
+                activeFormats = emptySet()
+            } else {
+                val markdownFormatted = applyMarkdownFormat(selectedText, style, textFieldValue.text, selection)
+                val newText = prefix + markdownFormatted + suffix
+                val newSelectionStart = prefix.length + markdownFormatted.length
+                textFieldValue = TextFieldValue(
+                    text = newText,
+                    selection = TextRange(newSelectionStart)
+                )
+                onMarkdownChanged(newText)
+            }
+        } else {
+            activeFormats = if (style == FormatStyle.NORMAL) {
+                emptySet()
+            } else if (activeFormats.contains(style)) {
+                activeFormats - style
+            } else {
+                val newActive = activeFormats.toMutableSet()
+                when (style) {
+                    FormatStyle.HEADING1, FormatStyle.HEADING2, FormatStyle.HEADING3 -> {
+                        newActive.removeAll(setOf(FormatStyle.HEADING1, FormatStyle.HEADING2, FormatStyle.HEADING3))
+                        newActive.add(style)
+                    }
+                    else -> newActive.add(style)
+                }
+                newActive
+            }
+        }
+        focusRequester.requestFocus()
+    }
+
+    LaunchedEffect(readOnly) {
+        if (!readOnly) {
+            try {
+                focusRequester.requestFocus()
+            } catch (e: Exception) { /* Ignore */ }
+        } else {
+            focusManager.clearFocus()
+        }
     }
 
     Column(modifier = modifier) {
-        // Format toolbar
-        if (showToolbar) {
+        if (showToolbar && !readOnly) {
             RichTextFormatToolbar(
-                onStyleSelected = { style ->
-                    textFieldValue = applyStyleToSelection(textFieldValue, style)
-                    markdownContent = convertToMarkdown(textFieldValue.text)
-                    onContentChanged(textFieldValue.text, markdownContent)
-                },
+                onStyleSelected = applyFormatting,
+                activeStyles = activeFormats,
                 modifier = Modifier.fillMaxWidth()
             )
         }
 
-        // Text editor
-        CompositionLocalProvider(
-            LocalTextSelectionColors provides customTextSelectionColors
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            color = MaterialTheme.colorScheme.surface,
+            shape = MaterialTheme.shapes.medium // Consider MaterialTheme.shapes.extraSmall or medium
         ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .verticalScroll(scrollState)
+                    .fillMaxSize()
                     .padding(16.dp)
+                    .verticalScroll(editorScrollState)
             ) {
-                if (textFieldValue.text.isEmpty()) {
-                    Text(
-                        text = "Start typing here...",
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                CompositionLocalProvider(LocalTextSelectionColors provides customTextSelectionColors) {
+                    BasicTextField(
+                        value = textFieldValue,
+                        onValueChange = { newValue ->
+                            textFieldValue = newValue
+                            onMarkdownChanged(newValue.text)
+                        },
+                        textStyle = TextStyle(
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 16.sp,
+                            fontFamily = FontFamily.Default,
+                            lineHeight = 24.sp
                         ),
-                        modifier = Modifier.padding(1.dp) // To match BasicTextField's intrinsic padding
+                        visualTransformation = richTextTransformation,
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(focusRequester),
+                        readOnly = readOnly
                     )
+                    if (textFieldValue.text.isEmpty() && !readOnly) {
+                        Text(
+                            text = placeholderText,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Visual transformation that converts markdown to rich text with correct offset mapping.
+ * Uses injected theme colors for styling.
+ */
+private class RichTextTransformation(private val colors: Colors) : VisualTransformation {
+
+    @Stable // Mark as stable if all constructor params are stable
+    data class Colors(
+        val h1: Color,
+        val h2: Color,
+        val h3: Color,
+        val quoteBackground: Color,
+        val quoteBorder: Color,
+        val list: Color,
+        val link: Color,
+        val codeBackground: Color,
+        val codeText: Color
+    )
+
+    data class HiddenRange(val start: Int, val length: Int) : Comparable<HiddenRange> {
+        override fun compareTo(other: HiddenRange): Int = start.compareTo(other.start)
+    }
+
+    private var lastOriginalText: String? = null
+    private var lastTransformedText: TransformedText? = null
+
+    override fun filter(text: AnnotatedString): TransformedText {
+        if (text.text == lastOriginalText && lastTransformedText != null) {
+            return lastTransformedText!!
+        }
+
+        val originalText = text.text
+        val hiddenRanges = mutableListOf<HiddenRange>()
+        val annotatedString = buildAnnotatedStringWithGaps(originalText, hiddenRanges)
+
+        val offsetMapping = MarkdownOffsetMapping(
+            originalText.length,
+            annotatedString.length,
+            hiddenRanges.sorted()
+        )
+        val result = TransformedText(annotatedString, offsetMapping)
+
+        lastOriginalText = originalText
+        lastTransformedText = result
+        return result
+    }
+
+    private fun buildAnnotatedStringWithGaps(
+        markdown: String,
+        hiddenRangesCollector: MutableList<HiddenRange>
+    ): AnnotatedString {
+        return buildAnnotatedString {
+            val lines = markdown.lines()
+            var currentOriginalIndex = 0
+
+            for ((lineIndex, line) in lines.withIndex()) {
+                val lineStartOriginalIndex = currentOriginalIndex
+
+                fun addHiddenRange(relativeStart: Int, length: Int) {
+                    if (length > 0) {
+                        hiddenRangesCollector.add(HiddenRange(lineStartOriginalIndex + relativeStart, length))
+                    }
                 }
 
-                BasicTextField(
-                    value = textFieldValue,
-                    onValueChange = { newValue ->
-                        textFieldValue = newValue
-                        markdownContent = convertToMarkdown(newValue.text)
-                        onContentChanged(newValue.text, markdownContent)
-                    },
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(
-                        color = MaterialTheme.colorScheme.onSurface
+                var consumedInLine = 0
+                val blockParseResult = parseBlockElement(line, lineStartOriginalIndex, hiddenRangesCollector)
+
+                if (blockParseResult != null) {
+                    withStyle(blockParseResult.style) { append(blockParseResult.visualText) }
+                    append(blockParseResult.contentText)
+                    consumedInLine = line.length
+                } else {
+                    var remainingLinePart = line
+                    var currentRelativeInlineIndex = 0
+
+                    while (remainingLinePart.isNotEmpty()) {
+                        val inlineMatch = findFirstInlineMarkdown(remainingLinePart)
+                        if (inlineMatch != null) {
+                            if (inlineMatch.matchStartIndexInChunk > 0) {
+                                append(remainingLinePart.substring(0, inlineMatch.matchStartIndexInChunk))
+                            }
+                            addHiddenRange(
+                                consumedInLine + currentRelativeInlineIndex + inlineMatch.matchStartIndexInChunk,
+                                inlineMatch.openingMarker.length
+                            )
+                            withStyle(inlineMatch.style) { append(inlineMatch.contentText) }
+                            addHiddenRange(
+                                consumedInLine + currentRelativeInlineIndex + inlineMatch.matchStartIndexInChunk +
+                                        inlineMatch.openingMarker.length + inlineMatch.contentText.length,
+                                inlineMatch.closingMarker.length
+                            )
+                            val consumedByMatch = inlineMatch.matchStartIndexInChunk +
+                                    inlineMatch.openingMarker.length +
+                                    inlineMatch.contentText.length +
+                                    inlineMatch.closingMarker.length
+                            currentRelativeInlineIndex += consumedByMatch
+                            remainingLinePart = remainingLinePart.substring(consumedByMatch)
+                        } else {
+                            append(remainingLinePart)
+                            currentRelativeInlineIndex += remainingLinePart.length
+                            remainingLinePart = ""
+                        }
+                    }
+                    consumedInLine += currentRelativeInlineIndex
+                }
+                currentOriginalIndex += line.length
+
+                if (lineIndex < lines.size - 1) {
+                    append("\n")
+                    currentOriginalIndex += 1
+                }
+            }
+        }
+    }
+
+    private data class BlockParseResult(
+        val style: SpanStyle,
+        val visualText: String,
+        val contentText: String
+    )
+
+    private fun parseBlockElement(
+        line: String,
+        lineStartOriginalIndex: Int,
+        hiddenRangesCollector: MutableList<HiddenRange>
+    ): BlockParseResult? {
+        fun addHidden(length: Int) {
+            if (length > 0) hiddenRangesCollector.add(HiddenRange(lineStartOriginalIndex, length))
+        }
+        return when {
+            line.startsWith("# ") -> { addHidden(2); BlockParseResult(SpanStyle(fontSize = 24.sp, fontWeight = FontWeight.Bold, color = colors.h1), "", line.substring(2)) }
+            line.startsWith("## ") -> { addHidden(3); BlockParseResult(SpanStyle(fontSize = 20.sp, fontWeight = FontWeight.Bold, color = colors.h2), "", line.substring(3)) }
+            line.startsWith("### ") -> { addHidden(4); BlockParseResult(SpanStyle(fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = colors.h3), "", line.substring(4)) }
+            line.startsWith("> ") -> {
+                addHidden(2)
+                // A more distinct quote style
+                BlockParseResult(
+                    SpanStyle(
+                        fontStyle = FontStyle.Italic,
+                        background = colors.quoteBackground,
+                        // Consider adding a border or padding visually via AnnotatedString if complex
                     ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(focusRequester),
-                    readOnly = readOnly
+                    "❝ ", // Visual prefix in the styled block
+                    line.substring(2) + " ❞" // Content
                 )
             }
+            line.startsWith("* ") || line.startsWith("- ") -> { addHidden(2); BlockParseResult(SpanStyle(color = colors.list), "•  ", line.substring(2)) }
+            line.matches(Regex("^\\d+\\. .*")) -> {
+                val markerMatch = Regex("^(\\d+\\.) ").find(line)
+                markerMatch?.let {
+                    val marker = it.value
+                    addHidden(marker.length)
+                    BlockParseResult(SpanStyle(color = colors.list, fontWeight = FontWeight.SemiBold), marker, line.substring(marker.length))
+                }
+            }
+            else -> null
+        }
+    }
+
+    private data class InlineMatch(
+        val matchStartIndexInChunk: Int,
+        val openingMarker: String,
+        val contentText: String,
+        val closingMarker: String,
+        val style: SpanStyle,
+        val fullMatchLength: Int
+    )
+
+    private data class PatternRule(
+        val regex: Regex,
+        val openingMarkerSyntaxBuilder: (MatchResult) -> String = { "" },
+        val contentTextBuilder: (MatchResult) -> String,
+        val closingMarkerSyntaxBuilder: (MatchResult) -> String = { "" },
+        val styleProvider: (MatchResult) -> SpanStyle // Not @Composable
+    )
+
+    private fun findFirstInlineMarkdown(lineChunk: String): InlineMatch? {
+        val patterns = listOf(
+            PatternRule(Regex("\\[([^]]+)]\\(([^)]*)\\)"), { "[" }, { it.groupValues[1] }, { "](${it.groupValues[2]})" }, { SpanStyle(color = colors.link, textDecoration = TextDecoration.Underline) }),
+            PatternRule(Regex("(?<!\\\\)\\*\\*(?!\\s)(.*?)(?<!\\s)(?<!\\\\)\\*\\*"), { "**" }, { it.groupValues[1] }, { "**" }, { SpanStyle(fontWeight = FontWeight.Bold) }),
+            PatternRule(Regex("(?<!\\\\)_(?!\\s)(.*?)(?<!\\s)(?<!\\\\)_"), { "_" }, { it.groupValues[1] }, { "_" }, { SpanStyle(fontStyle = FontStyle.Italic) }),
+            PatternRule(Regex("(?<![\\\\*])\\*(?!\\s|\\*)(.*?)(?<!\\s)(?<![\\\\*])\\*(?![*])"), { "*" }, { it.groupValues[1] }, { "*" }, { SpanStyle(fontStyle = FontStyle.Italic) }),
+            PatternRule(Regex("(?<!\\\\)~~(?!\\s)(.*?)(?<!\\s)(?<!\\\\)~~"), { "~~" }, { it.groupValues[1] }, { "~~" }, { SpanStyle(textDecoration = TextDecoration.LineThrough) }),
+            PatternRule(Regex("<u>(?!\\s)(.*?)(?<!\\s)</u>"), { "<u>" }, { it.groupValues[1] }, { "</u>" }, { SpanStyle(textDecoration = TextDecoration.Underline) }),
+            PatternRule(Regex("(?<!\\\\)`(?!\\s)(.*?)(?<!\\s)(?<!\\\\)`"), { "`" }, { it.groupValues[1] }, { "`" }, { SpanStyle(fontFamily = FontFamily.Monospace, background = colors.codeBackground, color = colors.codeText, fontSize = 14.sp) })
+        )
+        var earliestMatch: InlineMatch? = null
+        for (rule in patterns) {
+            rule.regex.findAll(lineChunk).forEach { matchResult ->
+                val candidate = InlineMatch(matchResult.range.first, rule.openingMarkerSyntaxBuilder(matchResult), rule.contentTextBuilder(matchResult), rule.closingMarkerSyntaxBuilder(matchResult), rule.styleProvider(matchResult), matchResult.value.length)
+                if (earliestMatch == null || candidate.matchStartIndexInChunk < earliestMatch!!.matchStartIndexInChunk || (candidate.matchStartIndexInChunk == earliestMatch!!.matchStartIndexInChunk && candidate.fullMatchLength > earliestMatch!!.fullMatchLength)) {
+                    earliestMatch = candidate
+                }
+            }
+        }
+        return earliestMatch
+    }
+
+    private class MarkdownOffsetMapping(
+        private val originalLength: Int,
+        private val transformedStringLength: Int,
+        private val sortedHiddenRanges: List<HiddenRange>
+    ) : OffsetMapping {
+        override fun originalToTransformed(offset: Int): Int {
+            var charsToSubtract = 0
+            for (range in sortedHiddenRanges) {
+                if (offset > range.start) {
+                    if (offset >= range.start + range.length) {
+                        charsToSubtract += range.length
+                    } else {
+                        charsToSubtract += (offset - range.start)
+                        break
+                    }
+                } else {
+                    break
+                }
+            }
+            return (offset - charsToSubtract).coerceIn(0, transformedStringLength)
+        }
+
+        override fun transformedToOriginal(offset: Int): Int {
+            var originalOffset = offset
+            var accumulatedHiddenLengthBeforeTransformedPos = 0
+            for (range in sortedHiddenRanges) {
+                val hiddenRangeStartInTransformed = range.start - accumulatedHiddenLengthBeforeTransformedPos
+                if (hiddenRangeStartInTransformed < offset) {
+                    originalOffset += range.length
+                    accumulatedHiddenLengthBeforeTransformedPos += range.length
+                } else {
+                    break
+                }
+            }
+            return originalOffset.coerceIn(0, originalLength)
         }
     }
 }
 
-/**
- * Apply formatting to the selected text
- */
-private fun applyStyleToSelection(
-    textFieldValue: TextFieldValue,
-    style: TextStyle
-): TextFieldValue {
-    val selection = textFieldValue.selection
-    if (selection.collapsed) {
-        // If no text is selected, just return the original value
-        return textFieldValue
+private fun applyMarkdownFormat(text: String, style: FormatStyle, fullText: String, selection: TextRange): String {
+    return when (style) {
+        FormatStyle.BOLD -> "**$text**"
+        FormatStyle.ITALIC -> "_${text}_"
+        FormatStyle.UNDERLINE -> "<u>$text</u>"
+        FormatStyle.STRIKETHROUGH -> "~~$text~~"
+        FormatStyle.HEADING1 -> text.lines().joinToString("\n") { "# $it" }
+        FormatStyle.HEADING2 -> text.lines().joinToString("\n") { "## $it" }
+        FormatStyle.HEADING3 -> text.lines().joinToString("\n") { "### $it" }
+        FormatStyle.BULLET_LIST -> text.lines().joinToString("\n") { "* $it" }
+        FormatStyle.NUMBERED_LIST -> text.lines().mapIndexed { i, line -> "${i + 1}. $line" }.joinToString("\n")
+        FormatStyle.QUOTE -> text.lines().joinToString("\n") { "> $it" }
+        FormatStyle.CODE -> "`$text`"
+        FormatStyle.LINK -> "[$text](url)"
+        FormatStyle.NORMAL -> text
     }
-
-    val selectedText = textFieldValue.text.substring(selection.start, selection.end)
-    val prefix = textFieldValue.text.substring(0, selection.start)
-    val suffix = textFieldValue.text.substring(selection.end)
-
-    // Apply the style
-    val styledText = when (style) {
-        TextStyle.BOLD -> "**$selectedText**"
-        TextStyle.ITALIC -> "_${selectedText}_"
-        TextStyle.UNDERLINE -> "<u>$selectedText</u>"
-        TextStyle.STRIKETHROUGH -> "~~$selectedText~~"
-        TextStyle.HEADING1 -> "# $selectedText"
-        TextStyle.HEADING2 -> "## $selectedText"
-        TextStyle.HEADING3 -> "### $selectedText"
-        TextStyle.BULLET_LIST -> "* $selectedText"
-        TextStyle.NUMBERED_LIST -> "1. $selectedText"
-        TextStyle.QUOTE -> "> $selectedText"
-        TextStyle.CODE -> "`$selectedText`"
-        TextStyle.LINK -> "[$selectedText](url)"
-        TextStyle.NORMAL -> selectedText // Remove formatting
-    }
-
-    val newText = prefix + styledText + suffix
-    val newCursorPosition = prefix.length + styledText.length
-
-    return TextFieldValue(
-        text = newText,
-        selection = TextRange(newCursorPosition)
-    )
 }
 
-/**
- * Basic conversion to Markdown format
- * (Note: For a production app, you'd want a more robust Markdown converter)
- */
-private fun convertToMarkdown(text: String): String {
-    // This is a simple implementation. In production, you'd use a proper
-    // library to handle the conversion with more complexity
-    return text
-}
-
-/**
- * For displaying rich text (read-only) with appropriate styling
- */
 @Composable
-fun RichTextDisplay(
-    markdownContent: String,
+fun RichTextFormatToolbar(
+    onStyleSelected: (FormatStyle) -> Unit,
+    activeStyles: Set<FormatStyle>,
     modifier: Modifier = Modifier
 ) {
-    val annotatedString = convertMarkdownToAnnotatedString(markdownContent)
+    // val haptic = LocalHapticFeedback.current // Not used if haptic feedback is in applyFormatting
+    val scrollState = rememberScrollState()
 
-    Text(
-        text = annotatedString,
-        style = MaterialTheme.typography.bodyLarge,
-        modifier = modifier.padding(16.dp)
-    )
-}
-
-/**
- * Convert markdown text to an AnnotatedString for display
- * This is a simplified implementation. In a production app,
- * you'd want to use a proper markdown parser.
- */
-@Composable
-private fun convertMarkdownToAnnotatedString(markdown: String): AnnotatedString {
-    if (markdown.isBlank()) return AnnotatedString("")
-
-    return buildAnnotatedString {
-        val lines = markdown.lines()
-
-        for (i in lines.indices) {
-            val line = lines[i]
-
-            // Handle headings
-            when {
-                line.startsWith("# ") -> {
-                    append(
-                        AnnotatedString(
-                            line.substringAfter("# "),
-                            SpanStyle(
-                                fontSize = 24.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        )
-                    )
-                }
-                line.startsWith("## ") -> {
-                    append(
-                        AnnotatedString(
-                            line.substringAfter("## "),
-                            SpanStyle(
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        )
-                    )
-                }
-                line.startsWith("### ") -> {
-                    append(
-                        AnnotatedString(
-                            line.substringAfter("### "),
-                            SpanStyle(
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        )
-                    )
-                }
-                line.startsWith("> ") -> {
-                    append(
-                        AnnotatedString(
-                            line.substringAfter("> "),
-                            SpanStyle(
-                                fontStyle = FontStyle.Italic,
-                                fontSize = 16.sp
-                            )
-                        )
-                    )
-                }
-                line.startsWith("* ") -> {
-                    append("• ")
-                    append(line.substringAfter("* "))
-                }
-                line.startsWith("1. ") -> {
-                    append("1. ")
-                    append(line.substringAfter("1. "))
-                }
-                else -> {
-                    // Process inline styles for regular text
-                    var currentText = line
-
-                    // Bold
-                    while (currentText.contains("**")) {
-                        val startIndex = currentText.indexOf("**")
-                        val endIndex = currentText.indexOf("**", startIndex + 2)
-
-                        if (endIndex > startIndex) {
-                            // Text before the bold section
-                            append(currentText.substring(0, startIndex))
-
-                            // Bold text
-                            append(
-                                AnnotatedString(
-                                    currentText.substring(startIndex + 2, endIndex),
-                                    SpanStyle(fontWeight = FontWeight.Bold)
-                                )
-                            )
-
-                            // Update remaining text
-                            currentText = currentText.substring(endIndex + 2)
-                        } else {
-                            // No matching closing tag, just append the rest
-                            append(currentText)
-                            break
-                        }
-                    }
-
-                    // Italic
-                    while (currentText.contains("_")) {
-                        val startIndex = currentText.indexOf("_")
-                        val endIndex = currentText.indexOf("_", startIndex + 1)
-
-                        if (endIndex > startIndex) {
-                            // Text before the italic section
-                            append(currentText.substring(0, startIndex))
-
-                            // Italic text
-                            append(
-                                AnnotatedString(
-                                    currentText.substring(startIndex + 1, endIndex),
-                                    SpanStyle(fontStyle = FontStyle.Italic)
-                                )
-                            )
-
-                            // Update remaining text
-                            currentText = currentText.substring(endIndex + 1)
-                        } else {
-                            // No matching closing tag, just append the rest
-                            append(currentText)
-                            break
-                        }
-                    }
-
-                    // Strikethrough
-                    while (currentText.contains("~~")) {
-                        val startIndex = currentText.indexOf("~~")
-                        val endIndex = currentText.indexOf("~~", startIndex + 2)
-
-                        if (endIndex > startIndex) {
-                            // Text before the strikethrough section
-                            append(currentText.substring(0, startIndex))
-
-                            // Strikethrough text
-                            append(
-                                AnnotatedString(
-                                    currentText.substring(startIndex + 2, endIndex),
-                                    SpanStyle(textDecoration = TextDecoration.LineThrough)
-                                )
-                            )
-
-                            // Update remaining text
-                            currentText = currentText.substring(endIndex + 2)
-                        } else {
-                            // No matching closing tag, just append the rest
-                            append(currentText)
-                            break
-                        }
-                    }
-
-                    // Code
-                    while (currentText.contains("`")) {
-                        val startIndex = currentText.indexOf("`")
-                        val endIndex = currentText.indexOf("`", startIndex + 1)
-
-                        if (endIndex > startIndex) {
-                            // Text before the code section
-                            append(currentText.substring(0, startIndex))
-
-                            // Code text
-                            append(
-                                AnnotatedString(
-                                    currentText.substring(startIndex + 1, endIndex),
-                                    SpanStyle(
-                                        fontFamily = FontFamily.Monospace,
-                                        background = MaterialTheme.colorScheme.surfaceVariant
-                                    )
-                                )
-                            )
-
-                            // Update remaining text
-                            currentText = currentText.substring(endIndex + 1)
-                        } else {
-                            // No matching closing tag, just append the rest
-                            append(currentText)
-                            break
-                        }
-                    }
-
-                    // Any remaining text
-                    if (currentText.isNotEmpty()) {
-                        append(currentText)
-                    }
-                }
+    Surface(
+        tonalElevation = 3.dp,
+        shadowElevation = 2.dp,
+        modifier = modifier
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .horizontalScroll(scrollState)
+                    .padding(horizontal = 8.dp)
+                    .fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FormatButtonWithState(text = "H1", tooltip = "Heading 1", isActive = activeStyles.contains(FormatStyle.HEADING1), onClick = { onStyleSelected(FormatStyle.HEADING1) })
+                FormatButtonWithState(text = "H2", tooltip = "Heading 2", isActive = activeStyles.contains(FormatStyle.HEADING2), onClick = { onStyleSelected(FormatStyle.HEADING2) })
+                FormatButtonWithState(text = "H3", tooltip = "Heading 3", isActive = activeStyles.contains(FormatStyle.HEADING3), onClick = { onStyleSelected(FormatStyle.HEADING3) })
+                VerticalDivider()
+                FormatButtonWithState(text = "B", tooltip = "Bold", isBold = true, isActive = activeStyles.contains(FormatStyle.BOLD), onClick = { onStyleSelected(FormatStyle.BOLD) })
+                FormatButtonWithState(text = "I", tooltip = "Italic", isItalic = true, isActive = activeStyles.contains(FormatStyle.ITALIC), onClick = { onStyleSelected(FormatStyle.ITALIC) })
+                FormatButtonWithState(text = "U", tooltip = "Underline", isUnderlined = true, isActive = activeStyles.contains(FormatStyle.UNDERLINE), onClick = { onStyleSelected(FormatStyle.UNDERLINE) })
+                FormatButtonWithState(text = "S", tooltip = "Strikethrough", isStrikethrough = true, isActive = activeStyles.contains(FormatStyle.STRIKETHROUGH), onClick = { onStyleSelected(FormatStyle.STRIKETHROUGH) })
+                VerticalDivider()
+                FormatButtonWithState(text = "•", tooltip = "Bullet List", isActive = activeStyles.contains(FormatStyle.BULLET_LIST), onClick = { onStyleSelected(FormatStyle.BULLET_LIST) })
+                FormatButtonWithState(text = "1.", tooltip = "Numbered List", isActive = activeStyles.contains(FormatStyle.NUMBERED_LIST), onClick = { onStyleSelected(FormatStyle.NUMBERED_LIST) })
+                VerticalDivider()
+                FormatButtonWithState(text = "\"", tooltip = "Quote", isActive = activeStyles.contains(FormatStyle.QUOTE), onClick = { onStyleSelected(FormatStyle.QUOTE) })
+                FormatButtonWithState(text = "</>", tooltip = "Code", isActive = activeStyles.contains(FormatStyle.CODE), onClick = { onStyleSelected(FormatStyle.CODE) })
+                FormatButtonWithState(text = "🔗", tooltip = "Link", isActive = activeStyles.contains(FormatStyle.LINK), onClick = { onStyleSelected(FormatStyle.LINK) })
+                VerticalDivider()
+                FormatButtonWithState(text = "Tx", tooltip = "Normal Text", isActive = activeStyles.isEmpty() || activeStyles.contains(FormatStyle.NORMAL), onClick = { onStyleSelected(FormatStyle.NORMAL) })
             }
-
-            // Add a line break after each line except the last one
-            if (i < lines.size - 1) {
-                append("\n")
-            }
+            Text(
+                text = "Select text to format, or toggle styles for new text.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 4.dp)
+            )
         }
     }
 }
+
+@Composable
+private fun FormatButtonWithState(
+    text: String,
+    tooltip: String,
+    onClick: () -> Unit,
+    isActive: Boolean = false,
+    isBold: Boolean = false,
+    isItalic: Boolean = false,
+    isUnderlined: Boolean = false,
+    isStrikethrough: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    val buttonBackgroundColor = if (isActive) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
+    val contentColor = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+
+    Box(
+        modifier = modifier
+            .padding(horizontal = 2.dp)
+            .clip(MaterialTheme.shapes.small)
+            .background(buttonBackgroundColor)
+            .border(
+                width = if (isActive) 1.5.dp else 1.dp,
+                color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                shape = MaterialTheme.shapes.small
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            color = contentColor,
+            fontWeight = if (isBold) FontWeight.Bold else FontWeight.Medium,
+            fontStyle = if (isItalic) FontStyle.Italic else FontStyle.Normal,
+            textDecoration = when {
+                isUnderlined && isStrikethrough -> TextDecoration.combine(listOf(TextDecoration.Underline, TextDecoration.LineThrough))
+                isUnderlined -> TextDecoration.Underline
+                isStrikethrough -> TextDecoration.LineThrough
+                else -> TextDecoration.None
+            },
+            fontSize = 14.sp
+        )
+    }
+}
+
+@Composable
+private fun VerticalDivider() {
+    Divider(
+        modifier = Modifier
+            .padding(vertical = 6.dp, horizontal = 6.dp)
+            .height(20.dp)
+            .width(1.dp),
+        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+    )
+}
+
+// Assume FormatStyle enum exists:
+// enum class TextStyle {
+// BOLD, ITALIC, UNDERLINE, STRIKETHROUGH, HEADING1, HEADING2, HEADING3,
+// BULLET_LIST, NUMBERED_LIST, QUOTE, CODE, LINK, NORMAL
+// }
