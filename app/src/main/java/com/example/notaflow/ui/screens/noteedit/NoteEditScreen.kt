@@ -1,6 +1,7 @@
 package com.example.notaflow.ui.screens.noteedit
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -28,7 +29,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TextFieldDefaults // Explicit import for TextFieldDefaults
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -39,17 +40,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.notaflow.ui.components.ColorSelector
 import com.example.notaflow.ui.components.RichTextEditor
-// import com.example.notaflow.utils.RichTextFormatter // Not used in this snippet, can be removed if not used elsewhere
+import com.example.notaflow.ui.components.EnhancedRichTextDisplay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NoteEditScreen(
-    noteId: Long?, // noteId is passed but not directly used in this Composable's logic, assuming ViewModel handles it
+    noteId: Long?,
     onNavigateBack: () -> Unit,
     viewModel: NoteEditViewModel = hiltViewModel()
 ) {
@@ -59,21 +61,8 @@ fun NoteEditScreen(
     // State for toggling rich text editing, initialized from ViewModel state
     var isRichTextEnabled by remember(state.isRichText) { mutableStateOf(state.isRichText) }
 
-    /*
-    // Effect for navigation and error handling
-    LaunchedEffect(state.saveCompleted, state.error) {
-        if (state.saveCompleted) {
-            onNavigateBack()
-            viewModel.resetSaveCompleted() // Reset the flag after navigation
-        }
-
-        state.error?.let { error ->
-            snackbarHostState.showSnackbar(error)
-            viewModel.dismissError()
-        }
-    }
-
-     */
+    // NEW: State to track if user is actively editing in non-rich text mode
+    var isEditing by remember { mutableStateOf(false) }
 
     // Effect for navigation and error handling
     LaunchedEffect(state.saveCompleted, state.error) {
@@ -114,9 +103,8 @@ fun NoteEditScreen(
                             onCheckedChange = { enabled ->
                                 isRichTextEnabled = enabled
                                 viewModel.setRichTextEnabled(enabled)
-                                // When switching from plain to rich, ensure richTextContent might need initialization
-                                // or from rich to plain, content should reflect the (potentially markdown) text.
-                                // This is handled by how initialContent and onContentChange are set up.
+                                // Reset editing state when switching modes
+                                isEditing = false
                             }
                         )
                     }
@@ -126,8 +114,7 @@ fun NoteEditScreen(
         floatingActionButton = {
             FloatingActionButton(
                 onClick = {
-                    viewModel.saveNote() // saveNote should ideally return a signal for completion if needed here,
-                    // but navigation is handled by LaunchedEffect on state.saveCompleted
+                    viewModel.saveNote()
                 },
                 containerColor = MaterialTheme.colorScheme.primary
             ) {
@@ -152,6 +139,7 @@ fun NoteEditScreen(
                 .padding(paddingValues)
                 .padding(16.dp)
         ) {
+            // Title card - no changes needed here
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
@@ -164,7 +152,7 @@ fun NoteEditScreen(
                     Box(
                         modifier = Modifier
                             .width(6.dp)
-                            .height(56.dp) // Ensure height matches TextField
+                            .height(56.dp)
                             .background(noteColor)
                     )
                     OutlinedTextField(
@@ -172,8 +160,8 @@ fun NoteEditScreen(
                         onValueChange = viewModel::onTitleChange,
                         label = { Text("Title") },
                         modifier = Modifier
-                            .weight(1f) // Allow TextField to take remaining space
-                            .padding(start = 8.dp, end = 8.dp), // Padding around text field
+                            .weight(1f)
+                            .padding(start = 8.dp, end = 8.dp),
                         singleLine = true,
                         colors = TextFieldDefaults.outlinedTextFieldColors(
                             focusedBorderColor = Color.Transparent,
@@ -186,6 +174,7 @@ fun NoteEditScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // Content editor/viewer - THIS IS THE MAIN SECTION THAT CHANGES
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -196,54 +185,80 @@ fun NoteEditScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .clip(RoundedCornerShape(8.dp)) // Ensure content respects rounded corners
+                        .clip(RoundedCornerShape(8.dp))
                 ) {
                     if (isRichTextEnabled) {
+                        // Rich text editor mode - remains the same
                         RichTextEditor(
                             initialContent = if (state.richTextContent.isNotEmpty()) {
                                 state.richTextContent
                             } else {
-                                // If switching from plain to rich, state.content might be plain.
-                                // RichTextEditor will treat it as initial markdown.
                                 state.content
                             },
-                            // The RichTextEditor now only provides the markdown text.
                             onMarkdownChanged = { markdownText ->
-                                // When rich text is enabled, update both general content and specific rich text content
-                                // to be the markdown.
                                 viewModel.onContentChange(markdownText)
                                 viewModel.onRichTextContentChange(markdownText)
                             },
                             modifier = Modifier.fillMaxSize()
-                            // placeholderText can be added if desired
                         )
                     } else {
-                        OutlinedTextField(
-                            value = state.content, // When rich text is disabled, this shows plain text (or raw markdown if switched from rich)
-                            onValueChange = { newContent ->
-                                viewModel.onContentChange(newContent)
-                                // If switching from rich text to plain, and user edits,
-                                // you might want to clear richTextContent or keep it as last known markdown.
-                                // For simplicity, we only update general content here.
-                                // If viewModel.onContentChange also updates richTextContent conditionally, that's fine.
-                            },
-                            label = { Text("Content") },
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(4.dp), // Inner padding for the TextField content
-                            // maxLines = Int.MAX_VALUE, // For truly multiline
-                            colors = TextFieldDefaults.outlinedTextFieldColors(
-                                focusedBorderColor = Color.Transparent,
-                                unfocusedBorderColor = Color.Transparent,
-                                cursorColor = MaterialTheme.colorScheme.primary
+                        // CHANGED: Display rich text when not editing, show editor when actively editing
+                        if (isEditing) {
+                            // Plain text editor for editing
+                            OutlinedTextField(
+                                value = state.content,
+                                onValueChange = { newContent ->
+                                    viewModel.onContentChange(newContent)
+                                    // If switching from rich text to plain, and user edits,
+                                    // keep the rich text content updated as well to preserve formatting
+                                    if (state.isRichText) {
+                                        viewModel.onRichTextContentChange(newContent)
+                                    }
+                                },
+                                label = { Text("Content") },
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(4.dp)
+                                    .onFocusChanged {
+                                        // Only update editing state when focus changes to ensure
+                                        // we don't constantly reset the state
+                                        if (!it.isFocused && isEditing) {
+                                            isEditing = false
+                                        }
+                                    },
+                                colors = TextFieldDefaults.outlinedTextFieldColors(
+                                    focusedBorderColor = Color.Transparent,
+                                    unfocusedBorderColor = Color.Transparent,
+                                    cursorColor = MaterialTheme.colorScheme.primary
+                                )
                             )
-                        )
+                        } else {
+                            // Rich text display for viewing - clickable to edit
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clickable { isEditing = true }
+                                    .padding(16.dp)
+                            ) {
+                                // Display formatted content
+                                EnhancedRichTextDisplay(
+                                    markdownContent = if (state.richTextContent.isNotEmpty()) {
+                                        state.richTextContent
+                                    } else {
+                                        state.content
+                                    },
+                                    modifier = Modifier.fillMaxSize(),
+                                    backgroundColor = MaterialTheme.colorScheme.surface
+                                )
+                            }
+                        }
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // Color selector - no changes needed
             Text(
                 text = "Note Color",
                 style = MaterialTheme.typography.labelLarge,

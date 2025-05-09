@@ -5,6 +5,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -12,6 +13,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -25,7 +27,7 @@ fun RichTextDisplay(
     modifier: Modifier = Modifier
 ) {
     // Convert markdown to annotated string
-    val annotatedString = convertToAnnotatedString(markdownContent)
+    val annotatedString = convertMarkdownToAnnotatedString(markdownContent)
 
     // Display the formatted text
     Text(
@@ -37,9 +39,16 @@ fun RichTextDisplay(
 
 /**
  * Convert markdown to annotated string for simple display
+ * Fixed to properly handle headers and other markdown elements
  */
-private fun convertToAnnotatedString(markdown: String): AnnotatedString {
+@Composable
+private fun convertMarkdownToAnnotatedString(markdown: String): AnnotatedString {
     if (markdown.isBlank()) return AnnotatedString("")
+
+    // Colors from the current theme for styling
+    val primary = MaterialTheme.colorScheme.primary
+    val onSurface = MaterialTheme.colorScheme.onSurface
+    val background = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
 
     return buildAnnotatedString {
         val lines = markdown.lines()
@@ -49,65 +58,178 @@ private fun convertToAnnotatedString(markdown: String): AnnotatedString {
 
             // Process different markdown formatting
             when {
-                line.startsWith("# ") -> {
+                // Proper regex matching for headers to fix the issue
+                line.matches(Regex("^#\\s+.*$")) -> {
                     // Heading 1
-                    append(line.substringAfter("# "))
+                    withStyle(SpanStyle(
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = primary
+                    )) {
+                        append(line.substringAfter("# "))
+                    }
                 }
-                line.startsWith("## ") -> {
+                line.matches(Regex("^##\\s+.*$")) -> {
                     // Heading 2
-                    append(line.substringAfter("## "))
+                    withStyle(SpanStyle(
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = primary.copy(alpha = 0.9f)
+                    )) {
+                        append(line.substringAfter("## "))
+                    }
                 }
-                line.startsWith("### ") -> {
+                line.matches(Regex("^###\\s+.*$")) -> {
                     // Heading 3
-                    append(line.substringAfter("### "))
+                    withStyle(SpanStyle(
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = primary.copy(alpha = 0.8f)
+                    )) {
+                        append(line.substringAfter("### "))
+                    }
                 }
                 line.startsWith("> ") -> {
-                    // Blockquote
-                    append("\"${line.substringAfter("> ")}\"")
+                    // Blockquote with improved styling
+                    withStyle(SpanStyle(
+                        fontStyle = FontStyle.Italic,
+                        background = background,
+                        color = onSurface.copy(alpha = 0.8f)
+                    )) {
+                        append("❝ ${line.substringAfter("> ")} ❞")
+                    }
                 }
-                line.startsWith("* ") -> {
-                    // Bullet list
-                    append("• ${line.substringAfter("* ")}")
+                line.matches(Regex("^[*+-]\\s+.*$")) -> {
+                    // Bullet list with robust pattern matching
+                    val bulletMatch = Regex("^([*+-])\\s+(.*)$").find(line)
+                    if (bulletMatch != null) {
+                        withStyle(SpanStyle(color = primary)) {
+                            append("• ")
+                        }
+                        append(bulletMatch.groupValues[2])
+                    } else {
+                        append(line)
+                    }
                 }
-                line.startsWith("1. ") -> {
+                line.matches(Regex("^\\d+\\.\\s+.*$")) -> {
                     // Numbered list
-                    append("1. ${line.substringAfter("1. ")}")
+                    val numberMatch = Regex("^(\\d+\\.)\\s+(.*)$").find(line)
+                    if (numberMatch != null) {
+                        withStyle(SpanStyle(
+                            color = primary,
+                            fontWeight = FontWeight.Bold
+                        )) {
+                            append(numberMatch.groupValues[1] + " ")
+                        }
+                        append(numberMatch.groupValues[2])
+                    } else {
+                        append(line)
+                    }
                 }
                 else -> {
-                    // Regular text with inline formatting
-                    val formattedLine = processInlineFormatting(line)
-                    append(formattedLine)
+                    // Inline formatting with improved patterns
+                    processInlineFormatting(line, this)
                 }
             }
 
             // Add line break except for last line
             if (i < lines.size - 1) {
                 append("\n")
+                // Add extra space after headings for better readability
+                if (line.matches(Regex("^#+\\s+.*$"))) {
+                    append("\n")
+                }
             }
         }
     }
 }
 
 /**
- * Process inline formatting in a text line
+ * Process inline markdown formatting in a text line
+ * Enhanced to properly handle all formatting types
  */
-private fun processInlineFormatting(text: String): String {
-    var result = text
+private fun processInlineFormatting(text: String, builder: AnnotatedString.Builder) {
+    var currentIndex = 0
 
-    // Bold
-    result = result.replace(Regex("\\*\\*(.*?)\\*\\*"), "$1")
+    while (currentIndex < text.length) {
+        // Bold: **text**
+        val boldMatch = Regex("\\*\\*(.+?)\\*\\*").find(text, currentIndex)
+        if (boldMatch != null && boldMatch.range.first == currentIndex) {
+            builder.withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                append(boldMatch.groupValues[1])
+            }
+            currentIndex = boldMatch.range.last + 1
+            continue
+        }
 
-    // Italic
-    result = result.replace(Regex("_(.*?)_"), "$1")
+        // Italic with underscores: _text_
+        val italicMatch = Regex("_(.+?)_").find(text, currentIndex)
+        if (italicMatch != null && italicMatch.range.first == currentIndex) {
+            builder.withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                append(italicMatch.groupValues[1])
+            }
+            currentIndex = italicMatch.range.last + 1
+            continue
+        }
 
-    // Strikethrough
-    result = result.replace(Regex("~~(.*?)~~"), "$1")
+        // Italic with asterisks: *text*
+        val italicAsteriskMatch = Regex("\\*(.+?)\\*").find(text, currentIndex)
+        if (italicAsteriskMatch != null && italicAsteriskMatch.range.first == currentIndex) {
+            builder.withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                append(italicAsteriskMatch.groupValues[1])
+            }
+            currentIndex = italicAsteriskMatch.range.last + 1
+            continue
+        }
 
-    // Code
-    result = result.replace(Regex("`(.*?)`"), "$1")
+        // Strikethrough: ~~text~~
+        val strikethroughMatch = Regex("~~(.+?)~~").find(text, currentIndex)
+        if (strikethroughMatch != null && strikethroughMatch.range.first == currentIndex) {
+            builder.withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) {
+                append(strikethroughMatch.groupValues[1])
+            }
+            currentIndex = strikethroughMatch.range.last + 1
+            continue
+        }
 
-    // Links [text](url)
-    result = result.replace(Regex("\\[(.*?)\\]\\(.*?\\)"), "$1")
+        // Underline: <u>text</u>
+        val underlineMatch = Regex("<u>(.+?)</u>").find(text, currentIndex)
+        if (underlineMatch != null && underlineMatch.range.first == currentIndex) {
+            builder.withStyle(SpanStyle(textDecoration = TextDecoration.Underline)) {
+                append(underlineMatch.groupValues[1])
+            }
+            currentIndex = underlineMatch.range.last + 1
+            continue
+        }
 
-    return result
+        // Code: `text`
+        val codeMatch = Regex("`(.+?)`").find(text, currentIndex)
+        if (codeMatch != null && codeMatch.range.first == currentIndex) {
+            builder.withStyle(SpanStyle(
+                fontFamily = FontFamily.Monospace,
+                background = Color.LightGray.copy(alpha = 0.2f)
+            )) {
+                append(codeMatch.groupValues[1])
+            }
+            currentIndex = codeMatch.range.last + 1
+            continue
+        }
+
+        // Link: [text](url)
+        val linkMatch = Regex("\\[(.+?)\\]\\((.+?)\\)").find(text, currentIndex)
+        if (linkMatch != null && linkMatch.range.first == currentIndex) {
+            builder.withStyle(SpanStyle(
+                color = Color.Blue,
+                textDecoration = TextDecoration.Underline
+            )) {
+                append(linkMatch.groupValues[1])
+            }
+            currentIndex = linkMatch.range.last + 1
+            continue
+        }
+
+        // If no formatting found at current position, append the character and move on
+        builder.append(text[currentIndex].toString())
+        currentIndex++
+    }
 }

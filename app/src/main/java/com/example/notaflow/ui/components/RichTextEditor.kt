@@ -4,34 +4,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-// import androidx.compose.foundation.layout.Spacer // Not used directly in this version
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-// import androidx.compose.foundation.layout.size // Not used directly in this version
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Divider
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.Stable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,11 +23,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.*
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -55,7 +32,6 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.notaflow.ui.components.TextStyle as FormatStyle
@@ -73,6 +49,7 @@ fun RichTextEditor(
     readOnly: Boolean = false,
     placeholderText: String = "Start typing here..."
 ) {
+
     val hapticFeedback = LocalHapticFeedback.current
     val focusRequester = remember { FocusRequester() }
     val editorScrollState = rememberScrollState()
@@ -88,6 +65,10 @@ fun RichTextEditor(
     }
 
     var activeFormats by remember { mutableStateOf(setOf<FormatStyle>()) }
+
+    // State for link dialog
+    var showLinkDialog by remember { mutableStateOf(false) }
+    var selectedText by remember { mutableStateOf("") }
 
     // Define colors for the transformation based on the current theme
     val transformationColors = RichTextTransformation.Colors(
@@ -106,44 +87,100 @@ fun RichTextEditor(
         RichTextTransformation(transformationColors)
     }
 
-    val applyFormatting = { style: FormatStyle ->
-        hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        val selection = textFieldValue.selection
-        if (!selection.collapsed) {
-            val selectedText = textFieldValue.text.substring(selection.start, selection.end)
-            val prefix = textFieldValue.text.substring(0, selection.start)
-            val suffix = textFieldValue.text.substring(selection.end)
+    val applyFormatting = remember {
+        applyFormatting@{ style: FormatStyle ->
+            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            val selection = textFieldValue.selection
 
-            if (style == FormatStyle.NORMAL) {
-                activeFormats = emptySet()
-            } else {
-                val markdownFormatted = applyMarkdownFormat(selectedText, style, textFieldValue.text, selection)
-                val newText = prefix + markdownFormatted + suffix
-                val newSelectionStart = prefix.length + markdownFormatted.length
-                textFieldValue = TextFieldValue(
-                    text = newText,
-                    selection = TextRange(newSelectionStart)
-                )
-                onMarkdownChanged(newText)
-            }
-        } else {
-            activeFormats = if (style == FormatStyle.NORMAL) {
-                emptySet()
-            } else if (activeFormats.contains(style)) {
-                activeFormats - style
-            } else {
-                val newActive = activeFormats.toMutableSet()
-                when (style) {
-                    FormatStyle.HEADING1, FormatStyle.HEADING2, FormatStyle.HEADING3 -> {
-                        newActive.removeAll(setOf(FormatStyle.HEADING1, FormatStyle.HEADING2, FormatStyle.HEADING3))
-                        newActive.add(style)
+            if (!selection.collapsed) {
+                // Fix: Add safe bounds checking for selection indices
+                val safeStart = selection.start.coerceIn(0, textFieldValue.text.length)
+                val safeEnd = selection.end.coerceIn(0, textFieldValue.text.length)
+
+
+                if (safeStart < safeEnd)
+                    selectedText = textFieldValue.text.substring(safeStart, safeEnd)
+                    if (style == FormatStyle.LINK){
+                        showLinkDialog = true
+                        return@applyFormatting
                     }
-                    else -> newActive.add(style)
+
+                if (style == FormatStyle.LINK) {
+                    showLinkDialog = true
+                    return@applyFormatting
                 }
-                newActive
+
+                val prefix = textFieldValue.text.substring(0, safeStart)
+                val suffix = textFieldValue.text.substring(safeEnd)
+
+                if (style == FormatStyle.NORMAL) {
+                    activeFormats = emptySet()
+                } else {
+                    val markdownFormatted = applyMarkdownFormat(selectedText, style, textFieldValue.text, selection)
+                    val newText = prefix + markdownFormatted + suffix
+                    val newSelectionStart = prefix.length + markdownFormatted.length
+                    textFieldValue = TextFieldValue(
+                        text = newText,
+                        selection = TextRange(newSelectionStart)
+                    )
+                    onMarkdownChanged(newText)
+                }
+            } else {
+                activeFormats = if (style == FormatStyle.NORMAL) {
+                    emptySet()
+                } else if (activeFormats.contains(style)) {
+                    activeFormats - style
+                } else {
+                    val newActive = activeFormats.toMutableSet()
+                    when (style) {
+                        FormatStyle.HEADING1, FormatStyle.HEADING2, FormatStyle.HEADING3 -> {
+                            newActive.removeAll(setOf(FormatStyle.HEADING1, FormatStyle.HEADING2, FormatStyle.HEADING3))
+                            newActive.add(style)
+                        }
+                        else -> newActive.add(style)
+                    }
+                    newActive
+                }
             }
+            focusRequester.requestFocus()
         }
-        focusRequester.requestFocus()
+    }
+
+    // Handle link dialog confirmation
+    if (showLinkDialog) {
+        LinkDialog(
+            initialText = selectedText,
+            isVisible = true,
+            onDismiss = { showLinkDialog = false },
+            onConfirm = { text, url ->
+                val selection = textFieldValue.selection
+                // Use safe indices
+                val safeStart = selection.start.coerceIn(0, textFieldValue.text.length)
+                val safeEnd = selection.end.coerceIn(0, textFieldValue.text.length)
+
+                // Only proceed if selection is valid
+                if (safeStart <= safeEnd) {
+                    val prefix = textFieldValue.text.substring(0, safeStart)
+                    val suffix = if (safeEnd < textFieldValue.text.length) {
+                        textFieldValue.text.substring(safeEnd)
+                    } else {
+                        ""
+                    }
+
+                    // Create markdown link
+                    val markdownLink = "[$text]($url)"
+                    val newText = prefix + markdownLink + suffix
+                    val newSelectionStart = prefix.length + markdownLink.length
+
+                    textFieldValue = TextFieldValue(
+                        text = newText,
+                        selection = TextRange(newSelectionStart)
+                    )
+                    onMarkdownChanged(newText)
+                }
+                showLinkDialog = false
+            }
+        )
     }
 
     LaunchedEffect(readOnly) {
@@ -170,7 +207,7 @@ fun RichTextEditor(
                 .fillMaxWidth()
                 .weight(1f),
             color = MaterialTheme.colorScheme.surface,
-            shape = MaterialTheme.shapes.medium // Consider MaterialTheme.shapes.extraSmall or medium
+            shape = MaterialTheme.shapes.medium
         ) {
             Box(
                 modifier = Modifier
@@ -198,6 +235,7 @@ fun RichTextEditor(
                             .focusRequester(focusRequester),
                         readOnly = readOnly
                     )
+
                     if (textFieldValue.text.isEmpty() && !readOnly) {
                         Text(
                             text = placeholderText,
@@ -245,13 +283,14 @@ private class RichTextTransformation(private val colors: Colors) : VisualTransfo
 
         val originalText = text.text
         val hiddenRanges = mutableListOf<HiddenRange>()
-        val annotatedString = buildAnnotatedStringWithGaps(originalText, hiddenRanges)
+        val annotatedString = buildAnnotatedStringWithGaps(originalText, hiddenRangesCollector = hiddenRanges)
 
         val offsetMapping = MarkdownOffsetMapping(
-            originalText.length,
-            annotatedString.length,
-            hiddenRanges.sorted()
+            originalLength = originalText.length,
+            transformedStringLength = annotatedString.length,
+            sortedHiddenRanges = hiddenRanges.sorted()
         )
+
         val result = TransformedText(annotatedString, offsetMapping)
 
         lastOriginalText = originalText
@@ -341,32 +380,71 @@ private class RichTextTransformation(private val colors: Colors) : VisualTransfo
         fun addHidden(length: Int) {
             if (length > 0) hiddenRangesCollector.add(HiddenRange(lineStartOriginalIndex, length))
         }
+
         return when {
-            line.startsWith("# ") -> { addHidden(2); BlockParseResult(SpanStyle(fontSize = 24.sp, fontWeight = FontWeight.Bold, color = colors.h1), "", line.substring(2)) }
-            line.startsWith("## ") -> { addHidden(3); BlockParseResult(SpanStyle(fontSize = 20.sp, fontWeight = FontWeight.Bold, color = colors.h2), "", line.substring(3)) }
-            line.startsWith("### ") -> { addHidden(4); BlockParseResult(SpanStyle(fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = colors.h3), "", line.substring(4)) }
+            // Handle headers (using regex for exact matching)
+            line.matches(Regex("^#\\s+.*$")) -> {
+                addHidden(2);
+                BlockParseResult(
+                    SpanStyle(fontSize = 24.sp, fontWeight = FontWeight.Bold, color = colors.h1),
+                    "",
+                    line.substring(2)
+                )
+            }
+            line.matches(Regex("^##\\s+.*$")) -> {
+                addHidden(3);
+                BlockParseResult(
+                    SpanStyle(fontSize = 20.sp, fontWeight = FontWeight.Bold, color = colors.h2),
+                    "",
+                    line.substring(3)
+                )
+            }
+            line.matches(Regex("^###\\s+.*$")) -> {
+                addHidden(4);
+                BlockParseResult(
+                    SpanStyle(fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = colors.h3),
+                    "",
+                    line.substring(4)
+                )
+            }
+
+            // Blockquotes
             line.startsWith("> ") -> {
                 addHidden(2)
-                // A more distinct quote style
                 BlockParseResult(
                     SpanStyle(
                         fontStyle = FontStyle.Italic,
                         background = colors.quoteBackground,
-                        // Consider adding a border or padding visually via AnnotatedString if complex
                     ),
                     "❝ ", // Visual prefix in the styled block
                     line.substring(2) + " ❞" // Content
                 )
             }
-            line.startsWith("* ") || line.startsWith("- ") -> { addHidden(2); BlockParseResult(SpanStyle(color = colors.list), "•  ", line.substring(2)) }
-            line.matches(Regex("^\\d+\\. .*")) -> {
-                val markerMatch = Regex("^(\\d+\\.) ").find(line)
+
+            // Bullet lists
+            line.matches(Regex("^[*+-]\\s+.*$")) -> {
+                addHidden(2);
+                BlockParseResult(
+                    SpanStyle(color = colors.list),
+                    "•  ",
+                    line.substring(2)
+                )
+            }
+
+            // Numbered lists
+            line.matches(Regex("^\\d+\\.\\s+.*$")) -> {
+                val markerMatch = Regex("^(\\d+\\.)\\s+").find(line)
                 markerMatch?.let {
                     val marker = it.value
                     addHidden(marker.length)
-                    BlockParseResult(SpanStyle(color = colors.list, fontWeight = FontWeight.SemiBold), marker, line.substring(marker.length))
+                    BlockParseResult(
+                        SpanStyle(color = colors.list, fontWeight = FontWeight.SemiBold),
+                        marker,
+                        line.substring(marker.length)
+                    )
                 }
             }
+
             else -> null
         }
     }
@@ -385,28 +463,83 @@ private class RichTextTransformation(private val colors: Colors) : VisualTransfo
         val openingMarkerSyntaxBuilder: (MatchResult) -> String = { "" },
         val contentTextBuilder: (MatchResult) -> String,
         val closingMarkerSyntaxBuilder: (MatchResult) -> String = { "" },
-        val styleProvider: (MatchResult) -> SpanStyle // Not @Composable
+        val styleProvider: (MatchResult) -> SpanStyle
     )
 
     private fun findFirstInlineMarkdown(lineChunk: String): InlineMatch? {
         val patterns = listOf(
-            PatternRule(Regex("\\[([^]]+)]\\(([^)]*)\\)"), { "[" }, { it.groupValues[1] }, { "](${it.groupValues[2]})" }, { SpanStyle(color = colors.link, textDecoration = TextDecoration.Underline) }),
-            PatternRule(Regex("(?<!\\\\)\\*\\*(?!\\s)(.*?)(?<!\\s)(?<!\\\\)\\*\\*"), { "**" }, { it.groupValues[1] }, { "**" }, { SpanStyle(fontWeight = FontWeight.Bold) }),
-            PatternRule(Regex("(?<!\\\\)_(?!\\s)(.*?)(?<!\\s)(?<!\\\\)_"), { "_" }, { it.groupValues[1] }, { "_" }, { SpanStyle(fontStyle = FontStyle.Italic) }),
-            PatternRule(Regex("(?<![\\\\*])\\*(?!\\s|\\*)(.*?)(?<!\\s)(?<![\\\\*])\\*(?![*])"), { "*" }, { it.groupValues[1] }, { "*" }, { SpanStyle(fontStyle = FontStyle.Italic) }),
-            PatternRule(Regex("(?<!\\\\)~~(?!\\s)(.*?)(?<!\\s)(?<!\\\\)~~"), { "~~" }, { it.groupValues[1] }, { "~~" }, { SpanStyle(textDecoration = TextDecoration.LineThrough) }),
-            PatternRule(Regex("<u>(?!\\s)(.*?)(?<!\\s)</u>"), { "<u>" }, { it.groupValues[1] }, { "</u>" }, { SpanStyle(textDecoration = TextDecoration.Underline) }),
-            PatternRule(Regex("(?<!\\\\)`(?!\\s)(.*?)(?<!\\s)(?<!\\\\)`"), { "`" }, { it.groupValues[1] }, { "`" }, { SpanStyle(fontFamily = FontFamily.Monospace, background = colors.codeBackground, color = colors.codeText, fontSize = 14.sp) })
+            PatternRule(
+                regex = Regex("\\[([^]]+)]\\(([^)]*)\\)"),
+                openingMarkerSyntaxBuilder = { "[" },
+                contentTextBuilder = { it.groupValues[1] },
+                closingMarkerSyntaxBuilder = { "](${it.groupValues[2]})" },
+                styleProvider = { SpanStyle(color = colors.link, textDecoration = TextDecoration.Underline) }
+            ),
+            PatternRule(
+                regex = Regex("(?<!\\\\)\\*\\*(?!\\s)(.*?)(?<!\\s)(?<!\\\\)\\*\\*"),
+                openingMarkerSyntaxBuilder = { "**" },
+                contentTextBuilder = { it.groupValues[1] },
+                closingMarkerSyntaxBuilder = { "**" },
+                styleProvider = { SpanStyle(fontWeight = FontWeight.Bold) }
+            ),
+            PatternRule(
+                regex = Regex("(?<!\\\\)_(?!\\s)(.*?)(?<!\\s)(?<!\\\\)_"),
+                openingMarkerSyntaxBuilder = { "_" },
+                contentTextBuilder = { it.groupValues[1] },
+                closingMarkerSyntaxBuilder = { "_" },
+                styleProvider = { SpanStyle(fontStyle = FontStyle.Italic) }
+            ),
+            PatternRule(
+                regex = Regex("(?<![\\\\*])\\*(?!\\s|\\*)(.*?)(?<!\\s)(?<![\\\\*])\\*(?![*])"),
+                openingMarkerSyntaxBuilder = { "*" },
+                contentTextBuilder = { it.groupValues[1] },
+                closingMarkerSyntaxBuilder = { "*" },
+                styleProvider = { SpanStyle(fontStyle = FontStyle.Italic) }
+            ),
+            PatternRule(
+                regex = Regex("(?<!\\\\)~~(?!\\s)(.*?)(?<!\\s)(?<!\\\\)~~"),
+                openingMarkerSyntaxBuilder = { "~~" },
+                contentTextBuilder = { it.groupValues[1] },
+                closingMarkerSyntaxBuilder = { "~~" },
+                styleProvider = { SpanStyle(textDecoration = TextDecoration.LineThrough) }
+            ),
+            PatternRule(
+                regex = Regex("<u>(?!\\s)(.*?)(?<!\\s)</u>"),
+                openingMarkerSyntaxBuilder = { "<u>" },
+                contentTextBuilder = { it.groupValues[1] },
+                closingMarkerSyntaxBuilder = { "</u>" },
+                styleProvider = { SpanStyle(textDecoration = TextDecoration.Underline) }
+            ),
+            PatternRule(
+                regex = Regex("(?<!\\\\)`(?!\\s)(.*?)(?<!\\s)(?<!\\\\)`"),
+                openingMarkerSyntaxBuilder = { "`" },
+                contentTextBuilder = { it.groupValues[1] },
+                closingMarkerSyntaxBuilder = { "`" },
+                styleProvider = { SpanStyle(fontFamily = FontFamily.Monospace, background = colors.codeBackground, color = colors.codeText, fontSize = 14.sp) }
+            )
         )
+
         var earliestMatch: InlineMatch? = null
         for (rule in patterns) {
             rule.regex.findAll(lineChunk).forEach { matchResult ->
-                val candidate = InlineMatch(matchResult.range.first, rule.openingMarkerSyntaxBuilder(matchResult), rule.contentTextBuilder(matchResult), rule.closingMarkerSyntaxBuilder(matchResult), rule.styleProvider(matchResult), matchResult.value.length)
-                if (earliestMatch == null || candidate.matchStartIndexInChunk < earliestMatch!!.matchStartIndexInChunk || (candidate.matchStartIndexInChunk == earliestMatch!!.matchStartIndexInChunk && candidate.fullMatchLength > earliestMatch!!.fullMatchLength)) {
+                val candidate = InlineMatch(
+                    matchStartIndexInChunk = matchResult.range.first,
+                    openingMarker = rule.openingMarkerSyntaxBuilder(matchResult),
+                    contentText = rule.contentTextBuilder(matchResult),
+                    closingMarker = rule.closingMarkerSyntaxBuilder(matchResult),
+                    style = rule.styleProvider(matchResult),
+                    fullMatchLength = matchResult.value.length
+                )
+
+                if (earliestMatch == null ||
+                    candidate.matchStartIndexInChunk < earliestMatch!!.matchStartIndexInChunk ||
+                    (candidate.matchStartIndexInChunk == earliestMatch!!.matchStartIndexInChunk &&
+                            candidate.fullMatchLength > earliestMatch!!.fullMatchLength)) {
                     earliestMatch = candidate
                 }
             }
         }
+
         return earliestMatch
     }
 
@@ -449,20 +582,59 @@ private class RichTextTransformation(private val colors: Colors) : VisualTransfo
     }
 }
 
+/**
+ * Applies the selected markdown format to the given text.
+ */
 private fun applyMarkdownFormat(text: String, style: FormatStyle, fullText: String, selection: TextRange): String {
     return when (style) {
         FormatStyle.BOLD -> "**$text**"
         FormatStyle.ITALIC -> "_${text}_"
         FormatStyle.UNDERLINE -> "<u>$text</u>"
         FormatStyle.STRIKETHROUGH -> "~~$text~~"
-        FormatStyle.HEADING1 -> text.lines().joinToString("\n") { "# $it" }
-        FormatStyle.HEADING2 -> text.lines().joinToString("\n") { "## $it" }
-        FormatStyle.HEADING3 -> text.lines().joinToString("\n") { "### $it" }
-        FormatStyle.BULLET_LIST -> text.lines().joinToString("\n") { "* $it" }
-        FormatStyle.NUMBERED_LIST -> text.lines().mapIndexed { i, line -> "${i + 1}. $line" }.joinToString("\n")
-        FormatStyle.QUOTE -> text.lines().joinToString("\n") { "> $it" }
+        FormatStyle.HEADING1 -> {
+            // Check if we need to prepend a newline
+            val needsNewline = selection.start > 0 &&
+                    fullText[selection.start - 1] != '\n' &&
+                    !text.startsWith("\n")
+            val prefix = if (needsNewline) "\n" else ""
+
+            // Apply heading to each line
+            val lines = text.lines()
+            prefix + lines.joinToString("\n") {
+                if (it.startsWith("# ")) it else "# $it"
+            }
+        }
+        FormatStyle.HEADING2 -> {
+            val needsNewline = selection.start > 0 &&
+                    fullText[selection.start - 1] != '\n' &&
+                    !text.startsWith("\n")
+            val prefix = if (needsNewline) "\n" else ""
+
+            prefix + text.lines().joinToString("\n") {
+                if (it.startsWith("## ")) it else "## $it"
+            }
+        }
+        FormatStyle.HEADING3 -> {
+            val needsNewline = selection.start > 0 &&
+                    fullText[selection.start - 1] != '\n' &&
+                    !text.startsWith("\n")
+            val prefix = if (needsNewline) "\n" else ""
+
+            prefix + text.lines().joinToString("\n") {
+                if (it.startsWith("### ")) it else "### $it"
+            }
+        }
+        FormatStyle.BULLET_LIST -> text.lines().joinToString("\n") {
+            if (it.matches(Regex("^[*+-]\\s+.*$"))) it else "* $it"
+        }
+        FormatStyle.NUMBERED_LIST -> text.lines().mapIndexed { i, line ->
+            if (line.matches(Regex("^\\d+\\.\\s+.*$"))) line else "${i + 1}. $line"
+        }.joinToString("\n")
+        FormatStyle.QUOTE -> text.lines().joinToString("\n") {
+            if (it.startsWith("> ")) it else "> $it"
+        }
         FormatStyle.CODE -> "`$text`"
-        FormatStyle.LINK -> "[$text](url)"
+        FormatStyle.LINK -> "[$text](https://)"
         FormatStyle.NORMAL -> text
     }
 }
@@ -473,7 +645,6 @@ fun RichTextFormatToolbar(
     activeStyles: Set<FormatStyle>,
     modifier: Modifier = Modifier
 ) {
-    // val haptic = LocalHapticFeedback.current // Not used if haptic feedback is in applyFormatting
     val scrollState = rememberScrollState()
 
     Surface(
@@ -493,23 +664,92 @@ fun RichTextFormatToolbar(
                     .fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                FormatButtonWithState(text = "H1", tooltip = "Heading 1", isActive = activeStyles.contains(FormatStyle.HEADING1), onClick = { onStyleSelected(FormatStyle.HEADING1) })
-                FormatButtonWithState(text = "H2", tooltip = "Heading 2", isActive = activeStyles.contains(FormatStyle.HEADING2), onClick = { onStyleSelected(FormatStyle.HEADING2) })
-                FormatButtonWithState(text = "H3", tooltip = "Heading 3", isActive = activeStyles.contains(FormatStyle.HEADING3), onClick = { onStyleSelected(FormatStyle.HEADING3) })
+                FormatButtonWithState(
+                    text = "H1",
+                    tooltip = "Heading 1",
+                    isActive = activeStyles.contains(FormatStyle.HEADING1),
+                    onClick = { onStyleSelected(FormatStyle.HEADING1) }
+                )
+                FormatButtonWithState(
+                    text = "H2",
+                    tooltip = "Heading 2",
+                    isActive = activeStyles.contains(FormatStyle.HEADING2),
+                    onClick = { onStyleSelected(FormatStyle.HEADING2) }
+                )
+                FormatButtonWithState(
+                    text = "H3",
+                    tooltip = "Heading 3",
+                    isActive = activeStyles.contains(FormatStyle.HEADING3),
+                    onClick = { onStyleSelected(FormatStyle.HEADING3) }
+                )
                 VerticalDivider()
-                FormatButtonWithState(text = "B", tooltip = "Bold", isBold = true, isActive = activeStyles.contains(FormatStyle.BOLD), onClick = { onStyleSelected(FormatStyle.BOLD) })
-                FormatButtonWithState(text = "I", tooltip = "Italic", isItalic = true, isActive = activeStyles.contains(FormatStyle.ITALIC), onClick = { onStyleSelected(FormatStyle.ITALIC) })
-                FormatButtonWithState(text = "U", tooltip = "Underline", isUnderlined = true, isActive = activeStyles.contains(FormatStyle.UNDERLINE), onClick = { onStyleSelected(FormatStyle.UNDERLINE) })
-                FormatButtonWithState(text = "S", tooltip = "Strikethrough", isStrikethrough = true, isActive = activeStyles.contains(FormatStyle.STRIKETHROUGH), onClick = { onStyleSelected(FormatStyle.STRIKETHROUGH) })
+                FormatButtonWithState(
+                    text = "B",
+                    tooltip = "Bold",
+                    isBold = true,
+                    isActive = activeStyles.contains(FormatStyle.BOLD),
+                    onClick = { onStyleSelected(FormatStyle.BOLD) }
+                )
+                FormatButtonWithState(
+                    text = "I",
+                    tooltip = "Italic",
+                    isItalic = true,
+                    isActive = activeStyles.contains(FormatStyle.ITALIC),
+                    onClick = { onStyleSelected(FormatStyle.ITALIC) }
+                )
+                FormatButtonWithState(
+                    text = "U",
+                    tooltip = "Underline",
+                    isUnderlined = true,
+                    isActive = activeStyles.contains(FormatStyle.UNDERLINE),
+                    onClick = { onStyleSelected(FormatStyle.UNDERLINE) }
+                )
+                FormatButtonWithState(
+                    text = "S",
+                    tooltip = "Strikethrough",
+                    isStrikethrough = true,
+                    isActive = activeStyles.contains(FormatStyle.STRIKETHROUGH),
+                    onClick = { onStyleSelected(FormatStyle.STRIKETHROUGH) }
+                )
                 VerticalDivider()
-                FormatButtonWithState(text = "•", tooltip = "Bullet List", isActive = activeStyles.contains(FormatStyle.BULLET_LIST), onClick = { onStyleSelected(FormatStyle.BULLET_LIST) })
-                FormatButtonWithState(text = "1.", tooltip = "Numbered List", isActive = activeStyles.contains(FormatStyle.NUMBERED_LIST), onClick = { onStyleSelected(FormatStyle.NUMBERED_LIST) })
+                FormatButtonWithState(
+                    text = "•",
+                    tooltip = "Bullet List",
+                    isActive = activeStyles.contains(FormatStyle.BULLET_LIST),
+                    onClick = { onStyleSelected(FormatStyle.BULLET_LIST) }
+                )
+                FormatButtonWithState(
+                    text = "1.",
+                    tooltip = "Numbered List",
+                    isActive = activeStyles.contains(FormatStyle.NUMBERED_LIST),
+                    onClick = { onStyleSelected(FormatStyle.NUMBERED_LIST) }
+                )
                 VerticalDivider()
-                FormatButtonWithState(text = "\"", tooltip = "Quote", isActive = activeStyles.contains(FormatStyle.QUOTE), onClick = { onStyleSelected(FormatStyle.QUOTE) })
-                FormatButtonWithState(text = "</>", tooltip = "Code", isActive = activeStyles.contains(FormatStyle.CODE), onClick = { onStyleSelected(FormatStyle.CODE) })
-                FormatButtonWithState(text = "🔗", tooltip = "Link", isActive = activeStyles.contains(FormatStyle.LINK), onClick = { onStyleSelected(FormatStyle.LINK) })
+                FormatButtonWithState(
+                    text = "\"",
+                    tooltip = "Quote",
+                    isActive = activeStyles.contains(FormatStyle.QUOTE),
+                    onClick = { onStyleSelected(FormatStyle.QUOTE) }
+                )
+                FormatButtonWithState(
+                    text = "</>",
+                    tooltip = "Code",
+                    isActive = activeStyles.contains(FormatStyle.CODE),
+                    onClick = { onStyleSelected(FormatStyle.CODE) }
+                )
+                FormatButtonWithState(
+                    text = "🔗",
+                    tooltip = "Link",
+                    isActive = activeStyles.contains(FormatStyle.LINK),
+                    onClick = { onStyleSelected(FormatStyle.LINK) }
+                )
                 VerticalDivider()
-                FormatButtonWithState(text = "Tx", tooltip = "Normal Text", isActive = activeStyles.isEmpty() || activeStyles.contains(FormatStyle.NORMAL), onClick = { onStyleSelected(FormatStyle.NORMAL) })
+                FormatButtonWithState(
+                    text = "Tx",
+                    tooltip = "Normal Text",
+                    isActive = activeStyles.isEmpty() || activeStyles.contains(FormatStyle.NORMAL),
+                    onClick = { onStyleSelected(FormatStyle.NORMAL) }
+                )
             }
             Text(
                 text = "Select text to format, or toggle styles for new text.",
@@ -576,9 +816,3 @@ private fun VerticalDivider() {
         color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
     )
 }
-
-// Assume FormatStyle enum exists:
-// enum class TextStyle {
-// BOLD, ITALIC, UNDERLINE, STRIKETHROUGH, HEADING1, HEADING2, HEADING3,
-// BULLET_LIST, NUMBERED_LIST, QUOTE, CODE, LINK, NORMAL
-// }

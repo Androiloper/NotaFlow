@@ -226,11 +226,8 @@ private fun NoteCard(
 
                 // Content - show either plain text or rich text preview
                 if (note.isRichText && note.richTextContent.isNotEmpty()) {
-                    // Rich text preview - simplified for list view
-                    val previewContent = if (note.richTextContent.length > 100)
-                        note.richTextContent.substring(0, 100) + "..."
-                    else
-                        note.richTextContent
+                    // Improved rich text preview
+                    val previewContent = generateSmartPreview(note.richTextContent)
 
                     // Display simplified version of rich text
                     RichTextDisplay(
@@ -260,6 +257,98 @@ private fun NoteCard(
             }
         }
     }
+}
+
+/**
+ * Generates a smart preview of markdown content that preserves markdown structure
+ * and avoids breaking in the middle of elements
+ */
+private fun generateSmartPreview(markdown: String): String {
+    if (markdown.length <= 150) return markdown
+
+    val lines = markdown.lines()
+    val previewLines = mutableListOf<String>()
+    var charCount = 0
+    var foundHeader = false
+    var inCodeBlock = false
+
+    // First pass: Try to include the first header as a summary
+    for (line in lines) {
+        if (line.matches(Regex("^#+ .*$"))) {
+            previewLines.add(line)
+            charCount += line.length + 1  // +1 for newline
+            foundHeader = true
+            break
+        }
+    }
+
+    // Second pass: Add content up to reasonable size
+    for (line in lines) {
+        // Skip header if we already included it
+        if (foundHeader && line.matches(Regex("^#+ .*$")) && previewLines.contains(line)) {
+            continue
+        }
+
+        // Handle code blocks - don't break in the middle
+        if (line.startsWith("```")) {
+            if (!inCodeBlock && charCount < 100) {
+                // Only start a code block if we have space
+                inCodeBlock = true
+                previewLines.add(line)
+                charCount += line.length + 1
+            } else if (inCodeBlock) {
+                // Always close a code block if we started one
+                inCodeBlock = false
+                previewLines.add(line)
+                charCount += line.length + 1
+                if (charCount > 120) break  // Stop after closing code block if preview is long enough
+            }
+            continue
+        }
+
+        // If in code block, always include the line
+        if (inCodeBlock) {
+            previewLines.add(line)
+            charCount += line.length + 1
+            continue
+        }
+
+        // Add the line if we have space
+        if (charCount + line.length <= 150) {
+            previewLines.add(line)
+            charCount += line.length + 1
+        } else {
+            // For the last line, try to find a good breaking point
+            val remainingChars = 150 - charCount
+            if (remainingChars > 10) {  // Only add partial if we can show something meaningful
+                // Find a good breaking point - prefer breaking at punctuation or space
+                var breakPoint = remainingChars
+                while (breakPoint > 0) {
+                    if (breakPoint < line.length && line[breakPoint] in listOf(' ', '.', ',', '!', '?', ';', ':')) {
+                        break
+                    }
+                    breakPoint--
+                }
+
+                if (breakPoint > 0) {
+                    previewLines.add(line.substring(0, breakPoint) + "...")
+                }
+            }
+            break
+        }
+    }
+
+    // Always close code blocks in preview
+    if (inCodeBlock) {
+        previewLines.add("```")
+    }
+
+    // Add ellipsis if we truncated and didn't already add it
+    if (charCount > 150 && !previewLines.last().endsWith("...")) {
+        previewLines.add("...")
+    }
+
+    return previewLines.joinToString("\n")
 }
 
 @Composable
