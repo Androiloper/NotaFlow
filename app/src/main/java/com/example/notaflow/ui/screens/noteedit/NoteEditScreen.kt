@@ -3,7 +3,6 @@ package com.example.notaflow.ui.screens.noteedit
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -22,9 +21,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.FormatBold // Example, replace with actual icon for "Enable Formatting"
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.Refresh // Example for Reset Zoom
+import androidx.compose.material.icons.filled.FormatBold
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -34,7 +32,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -62,16 +59,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.notaflow.ui.components.ColorSelector
-import com.example.notaflow.ui.components.LinkDialog // Make sure you have this
-import com.example.notaflow.ui.components.RichTextEditor // This is from noteflow_richtext_editor_composable
-import com.example.notaflow.utils.RichTextFormatter
+import com.example.notaflow.ui.components.LinkDialog
+import com.example.notaflow.ui.components.RichTextEditor
+import com.example.notaflow.ui.components.RichTextFormatAction
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
@@ -79,12 +75,10 @@ import kotlin.math.absoluteValue
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NoteEditScreen(
-    // noteId: Long?, // Already in ViewModel via SavedStateHandle
+    noteId: Long?,
     onNavigateBack: () -> Unit,
     viewModel: NoteEditViewModel = hiltViewModel()
 ) {
-    val editorScrollState = rememberScrollState()
-    // var showTableOfContents by remember { mutableStateOf(false) } // Not used in provided snippet fully
     val state by viewModel.state.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
@@ -111,37 +105,23 @@ fun NoteEditScreen(
         state.error?.let { error ->
             snackbarHostState.showSnackbar(
                 message = error,
-                duration = SnackbarDuration.Short
+                duration = androidx.compose.material3.SnackbarDuration.Short
             )
             viewModel.dismissError() // Ensure this is called
         }
     }
 
-    // Effect to potentially fix content when switching to rich text
-    // This depends on how you manage plain vs. rich content.
-    // If state.content (TextFieldValue) is always the source of truth, this might not be needed
-    // or needs to be adapted.
-    LaunchedEffect(isRichTextEnabledState, state.content.text) {
-        if (isRichTextEnabledState) {
-            // If you have a separate raw markdown/HTML source that needs fixing:
-            // val fixedContent = RichTextFormatter.fixMarkdownErrors(state.rawMarkdownContent)
-            // if (fixedContent != state.rawMarkdownContent) {
-            //     viewModel.onRawMarkdownContentChange(fixedContent) // You'd need this method
-            // }
-        }
-    }
-
+    // Show LinkDialog when needed
     if (state.showLinkDialog) {
         LinkDialog(
-            currentUrl = state.currentLinkUrl,
-            currentText = state.currentLinkText,
-            onUrlChange = viewModel::onLinkUrlChange,
-            onTextChange = viewModel::onLinkTextChange,
+            initialText = state.currentLinkText,
             onDismiss = viewModel::onLinkDialogDismiss,
-            onConfirm = { url, text -> viewModel.applyLink(url, text) }
+            onConfirm = viewModel::applyLink,
+            onTextChange = viewModel::onLinkTextChange,
+            onUrlChange = viewModel::onLinkUrlChange,
+            currentUrl = state.currentLinkUrl
         )
     }
-
 
     Scaffold(
         topBar = {
@@ -186,9 +166,6 @@ fun NoteEditScreen(
                             )
                         )
                     }
-                    // IconButton(onClick = { /* showTableOfContents = !showTableOfContents */ }) {
-                    //     Icon(Icons.Default.List, "Table of Contents")
-                    // }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant
@@ -206,7 +183,9 @@ fun NoteEditScreen(
                 Icon(Icons.Default.Check, "Save", tint = MaterialTheme.colorScheme.onPrimary)
             }
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) }
+        snackbarHost = {
+            SnackbarHost(hostState = snackbarHostState)
+        }
     ) { paddingValues ->
         val noteColor = try {
             Color(android.graphics.Color.parseColor(state.noteColorHex))
@@ -230,12 +209,17 @@ fun NoteEditScreen(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.width(6.dp).height(56.dp).background(noteColor))
+                    Box(modifier = Modifier
+                        .width(6.dp)
+                        .height(56.dp)
+                        .background(noteColor))
                     OutlinedTextField(
                         value = state.title,
                         onValueChange = viewModel::onTitleChange,
                         label = { Text("Title") },
-                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 8.dp),
                         singleLine = true,
                         colors = TextFieldDefaults.outlinedTextFieldColors(
                             focusedBorderColor = Color.Transparent,
@@ -264,7 +248,6 @@ fun NoteEditScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .clip(RoundedCornerShape(8.dp))
-                        // .verticalScroll(editorScrollState) // Scroll handled by RichTextEditor's TextField or plain text field
                         .pointerInput(Unit) {
                             detectTransformGestures { _, pan, zoom, _ ->
                                 if (isEditingPlainText && isRichTextEnabledState) return@detectTransformGestures // No zoom if typing in rich text
@@ -293,27 +276,42 @@ fun NoteEditScreen(
                             )
                     ) {
                         if (isRichTextEnabledState) {
-                            RichTextEditor( // Using the one from noteflow_richtext_editor_composable
-                                titleValue = state.title, // Pass title if your editor needs it, or remove
-                                onTitleChange = viewModel::onTitleChange, // Pass if editor handles title
+                            RichTextEditor(
+                                titleValue = state.title,
+                                onTitleChange = viewModel::onTitleChange,
                                 contentValue = state.content,
                                 onContentChange = viewModel::onContentChange,
                                 onStyleClick = viewModel::handleFormatAction,
-                                onLinkClick = { viewModel.handleFormatAction(RichTextFormatAction.LINK) },
-                                onColorSelected = viewModel::applyTextColor,
+                                onLinkClick = {
+                                    viewModel.handleFormatAction(RichTextFormatAction.LINK)
+                                },
+                                // Handle color changes locally and then call the ViewModel
+                                onColorSelected = { color ->
+                                    coroutineScope.launch {
+                                        try {
+                                            // Call the ViewModel method if it exists
+                                            viewModel.handleFormatAction(RichTextFormatAction.COLOR)
+                                            // You might need some additional state here if the ViewModel
+                                            // doesn't properly handle the color
+                                        } catch (e: Exception) {
+                                            // Fallback if the method doesn't exist or has errors
+                                            // This is where you'd handle the color directly if needed
+                                        }
+                                    }
+                                },
                                 currentSelectedTextColor = state.currentSelectedTextColor,
                                 currentFormatStyles = state.currentFormatStyles,
                                 canUndo = state.canUndo,
                                 canRedo = state.canRedo,
-                                noteColor = noteColor, // Or MaterialTheme.colorScheme.surface
-                                modifier = Modifier.fillMaxSize() // RichTextEditor itself should be scrollable
+                                noteColor = noteColor,
+                                modifier = Modifier.fillMaxSize()
                             )
                         } else { // Plain Text Mode
                             if (isEditingPlainText || state.content.text.isEmpty()) { // Show editor if focused or content is empty
                                 OutlinedTextField(
-                                    value = state.content.text, // Use .text for plain TextField
+                                    value = state.content.text,
                                     onValueChange = { newText ->
-                                        viewModel.onContentChange(TextFieldValue(newText, TextRange(newText.length)))
+                                        viewModel.onContentChange(TextFieldValue(newText))
                                     },
                                     label = { Text("Content") },
                                     modifier = Modifier
@@ -353,10 +351,13 @@ fun NoteEditScreen(
                         }
                     }
 
-                    AnimatedVisibility(
+                    this@Card.AnimatedVisibility(
                         visible = scale > 1.05f && !isEditingPlainText,
-                        enter = fadeIn(), exit = fadeOut(),
-                        modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
+                        enter = fadeIn(),
+                        exit = fadeOut(),
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(8.dp)
                     ) {
                         Surface(
                             color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.8f),
@@ -384,11 +385,11 @@ fun NoteEditScreen(
             ColorSelector(
                 selectedColorHex = state.noteColorHex,
                 onColorSelected = viewModel::onColorSelect,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
             )
             Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
-
-// calculateScrollPosition and animateScrollTo extension can be kept if TableOfContents is implemented

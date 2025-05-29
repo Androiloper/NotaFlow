@@ -4,7 +4,6 @@ package com.example.notaflow.domain.usecase
 import android.util.Log
 import com.example.notaflow.data.local.entity.Note
 import com.example.notaflow.data.repository.NoteRepository
-import java.util.Date
 import javax.inject.Inject
 
 class SaveNoteUseCase @Inject constructor(
@@ -12,12 +11,17 @@ class SaveNoteUseCase @Inject constructor(
 ) {
     suspend operator fun invoke(note: Note): Long {
         // Make a copy of the note with updated timestamps
+        val currentTime = System.currentTimeMillis()
+
         val noteToSave = if (note.id == 0L) {
-            // New note - use current date for both timestamps
-            note.copy(createdAt = Date(), modifiedAt = Date())
+            // New note - use current time for both timestamps
+            note.copy(
+                createdTimestamp = currentTime,
+                timestamp = currentTime
+            )
         } else {
-            // Existing note - preserve creation date, update modified date
-            note.copy(modifiedAt = Date())
+            // Existing note - preserve creation timestamp, update modification timestamp
+            note.copy(timestamp = currentTime)
         }
 
         // Log the operation for debugging

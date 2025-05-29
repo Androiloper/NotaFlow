@@ -53,8 +53,8 @@ class NoteListViewModel @Inject constructor(
         }
         .combine(sortOrder) { notes, sortOrder ->
             when (sortOrder) {
-                UserPreferencesRepository.NoteSortOrder.MODIFIED_DESC -> notes.sortedByDescending { it.modifiedAt }
-                UserPreferencesRepository.NoteSortOrder.CREATED_DESC -> notes.sortedByDescending { it.createdAt }
+                UserPreferencesRepository.NoteSortOrder.MODIFIED_DESC -> notes.sortedByDescending { it.timestamp }
+                UserPreferencesRepository.NoteSortOrder.CREATED_DESC -> notes.sortedByDescending { it.createdTimestamp }
                 UserPreferencesRepository.NoteSortOrder.TITLE_ASC -> notes.sortedBy { it.title }
             }
         }

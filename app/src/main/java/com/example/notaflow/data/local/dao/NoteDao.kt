@@ -16,7 +16,7 @@ interface NoteDao {
     fun getAllActiveNotes(): Flow<List<Note>>
 
     @Query("SELECT * FROM notes WHERE id = :noteId")
-    suspend fun getNoteById(noteId: Long): Note? // If Note ID is Int, change param to Int
+    suspend fun getNoteById(noteId: Long): Note? // Note ID as Long to match entity
 
     @Query("SELECT * FROM notes WHERE isDeleted = 0 AND (title LIKE '%' || :searchQuery || '%' OR content LIKE '%' || :searchQuery || '%') ORDER BY timestamp DESC")
     fun searchNotes(searchQuery: String): Flow<List<Note>>
@@ -31,10 +31,10 @@ interface NoteDao {
     suspend fun hardDeleteNote(note: Note)
 
     @Query("UPDATE notes SET isDeleted = 1, deletedTimestamp = :timestamp WHERE id = :noteId")
-    suspend fun softDeleteNote(noteId: Long, timestamp: Long = System.currentTimeMillis()) // If Note ID is Int, change param
+    suspend fun softDeleteNote(noteId: Long, timestamp: Long = System.currentTimeMillis())
 
     @Query("UPDATE notes SET isDeleted = 0, deletedTimestamp = NULL WHERE id = :noteId")
-    suspend fun restoreNote(noteId: Long) // If Note ID is Int, change param
+    suspend fun restoreNote(noteId: Long)
 
     @Query("SELECT * FROM notes WHERE isDeleted = 1 AND deletedTimestamp IS NOT NULL ORDER BY deletedTimestamp DESC")
     fun getDeletedNotes(): Flow<List<Note>>
@@ -43,7 +43,7 @@ interface NoteDao {
     suspend fun cleanupOldDeletedNotes(cutoffTimestamp: Long)
 
     @Transaction
-    suspend fun safeRestoreNote(noteId: Long) { // If Note ID is Int, change param
+    suspend fun safeRestoreNote(noteId: Long) {
         val note = getNoteById(noteId)
         note?.let {
             val restoredNote = it.copy(

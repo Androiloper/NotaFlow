@@ -31,31 +31,43 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 
 /**
- * Enhanced dialog for adding or editing a hyperlink in the rich text editor
+ * Enhanced dialog for adding or editing a hyperlink in the rich text editor.
+ * Compatible with multiple call patterns from the ViewModel.
  */
 @Composable
 fun LinkDialog(
-    initialText: String,
-    isVisible: Boolean,
+    // Support for original parameters
+    initialText: String = "",
+    isVisible: Boolean = true,
     onDismiss: () -> Unit,
-    onConfirm: (text: String, url: String) -> Unit
+    onConfirm: (url: String, text: String) -> Unit,
+
+    // Support for newer parameters
+    currentText: String = initialText,
+    currentUrl: String = "",
+    onTextChange: ((String) -> Unit)? = null,
+    onUrlChange: ((String) -> Unit)? = null
 ) {
     if (!isVisible) return
 
-    var linkText by remember { mutableStateOf(initialText) }
-    var linkUrl by remember { mutableStateOf("https://") }
+    var linkText by remember(currentText) { mutableStateOf(currentText) }
+    var linkUrl by remember(currentUrl) { mutableStateOf(if (currentUrl.isNotEmpty()) currentUrl else "https://") }
     var isUrlValid by remember { mutableStateOf(true) }
 
     // Auto-validate URL as user types
     LaunchedEffect(linkUrl) {
         isUrlValid = linkUrl.isBlank() || linkUrl.startsWith("http")
+        onUrlChange?.invoke(linkUrl)
+    }
+
+    LaunchedEffect(linkText) {
+        onTextChange?.invoke(linkText)
     }
 
     // Focus requesters for text fields
@@ -64,7 +76,7 @@ fun LinkDialog(
 
     // Auto-focus the text field if empty, otherwise the URL field
     LaunchedEffect(Unit) {
-        if (initialText.isBlank()) {
+        if (currentText.isBlank()) {
             textFocusRequester.requestFocus()
         } else {
             urlFocusRequester.requestFocus()
@@ -84,7 +96,10 @@ fun LinkDialog(
                 // Link text field
                 OutlinedTextField(
                     value = linkText,
-                    onValueChange = { linkText = it },
+                    onValueChange = {
+                        linkText = it
+                        onTextChange?.invoke(it)
+                    },
                     label = { Text("Link Text") },
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Text,
@@ -104,7 +119,10 @@ fun LinkDialog(
                 // URL field
                 OutlinedTextField(
                     value = linkUrl,
-                    onValueChange = { linkUrl = it },
+                    onValueChange = {
+                        linkUrl = it
+                        onUrlChange?.invoke(it)
+                    },
                     label = { Text("URL") },
                     placeholder = { Text("https://example.com") },
                     keyboardOptions = KeyboardOptions(
@@ -114,8 +132,7 @@ fun LinkDialog(
                     keyboardActions = KeyboardActions(
                         onDone = {
                             if (isValidLink(linkText, linkUrl)) {
-                                onConfirm(linkText, linkUrl)
-                                onDismiss()
+                                onConfirm(linkUrl, linkText)
                             }
                         }
                     ),
@@ -152,8 +169,7 @@ fun LinkDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    onConfirm(linkText, linkUrl)
-                    onDismiss()
+                    onConfirm(linkUrl, linkText)
                 },
                 enabled = isValidLink(linkText, linkUrl)
             ) {

@@ -27,9 +27,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.notaflow.data.local.entity.Note
 
 /**
  * A professional-looking rich text preview component
@@ -250,12 +252,10 @@ fun parseMarkdownForDisplay(markdown: String): AnnotatedString {
 fun NoteDetailView(
     title: String,
     content: String,
-    colorHex: String,
-    isRichText: Boolean,
-    richTextContent: String,
+    colorIndex: Int,
     modifier: Modifier = Modifier
 ) {
-    val noteColor = Color(android.graphics.Color.parseColor(colorHex))
+    val noteColor = Note.getColorByIndex(colorIndex)
 
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -292,19 +292,11 @@ fun NoteDetailView(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
-                if (isRichText && richTextContent.isNotEmpty()) {
-                    // Rich text content
-                    RichTextViewer(
-                        markdownContent = richTextContent,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                } else {
-                    // Plain text content
-                    Text(
-                        text = content.ifEmpty { "No content" },
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                }
+                // Show the content using RichTextViewer for HTML content
+                RichTextViewer(
+                    markdownContent = content,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
 
             Spacer(modifier = Modifier.height(16.dp))

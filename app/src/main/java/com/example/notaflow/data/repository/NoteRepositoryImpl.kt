@@ -5,7 +5,6 @@ import com.example.notaflow.data.local.dao.NoteDao
 import com.example.notaflow.data.local.entity.Note
 import kotlinx.coroutines.flow.Flow
 import java.util.Calendar
-import java.util.Date
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -21,12 +20,12 @@ class NoteRepositoryImpl @Inject constructor(
     override fun searchNotes(query: String): Flow<List<Note>> = noteDao.searchNotes(query)
 
     override suspend fun insertNote(note: Note): Long {
-        val noteToInsert = note.copy(isDeleted = false, deletedAt = null)
+        val noteToInsert = note.copy(isDeleted = false, deletedTimestamp = null)
         return noteDao.insertNote(noteToInsert)
     }
 
     override suspend fun updateNote(note: Note) {
-        val noteToUpdate = note.copy(isDeleted = false, deletedAt = null)
+        val noteToUpdate = note.copy(isDeleted = false, deletedTimestamp = null)
         noteDao.updateNote(noteToUpdate)
     }
 
@@ -34,7 +33,7 @@ class NoteRepositoryImpl @Inject constructor(
 
     override suspend fun softDeleteNote(noteId: Long) {
         Log.d("NotaFlow", "Repository: Soft deleting note ID $noteId")
-        noteDao.softDeleteNote(noteId, Date())
+        noteDao.softDeleteNote(noteId, System.currentTimeMillis())
         Log.d("NotaFlow", "Repository: Note ID $noteId marked as deleted")
     }
 
@@ -54,7 +53,7 @@ class NoteRepositoryImpl @Inject constructor(
     override suspend fun cleanupOldDeletedNotes(daysToKeep: Int) {
         val calendar = Calendar.getInstance()
         calendar.add(Calendar.DAY_OF_YEAR, -daysToKeep)
-        val cutoffDate = calendar.time
-        noteDao.cleanupOldDeletedNotes(cutoffDate)
+        val cutoffTimestamp = calendar.timeInMillis
+        noteDao.cleanupOldDeletedNotes(cutoffTimestamp)
     }
 }

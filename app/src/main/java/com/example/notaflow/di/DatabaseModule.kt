@@ -30,11 +30,18 @@ object DatabaseModule {
         return appDatabase.noteDao()
     }
 
+    // Remove this method or fix it if RichTextConverter should be provided differently
+    // The issue is that RichTextConverter is likely an object (singleton) and cannot be instantiated
+    // If you need to provide RichTextConverter as a dependency, you'll need to reference it directly
+    /*
     @Provides
     @Singleton
     fun provideRichTextConverter(): RichTextConverter {
-        return RichTextConverter()
+        // Don't try to instantiate RichTextConverter if it's an object
+        // Simply return the singleton instance
+        return RichTextConverter
     }
+    */
 
     @Provides
     @Singleton

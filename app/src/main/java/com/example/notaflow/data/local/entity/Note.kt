@@ -3,11 +3,12 @@ package com.example.notaflow.data.local.entity
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import androidx.compose.ui.graphics.Color // Keep for companion object if colors are defined here
+import androidx.compose.ui.graphics.toArgb
 
 @Entity(tableName = "notes")
 data class Note(
     @PrimaryKey(autoGenerate = true)
-    val id: Int = 0, // Assuming your DAO getNoteById uses Long, ensure ID type matches or cast in DAO
+    val id: Long = 0, // Changed from Int to Long to match DAOs
     val title: String,
     val content: String, // Stores rich text content (HTML)
     val createdTimestamp: Long = System.currentTimeMillis(),
@@ -40,6 +41,12 @@ data class Note(
         fun indexOfColor(colorToFind: Color): Int {
             val index = noteColors.indexOf(colorToFind)
             return if (index != -1) index else 0 // Default to first color's index if not found
+        }
+
+        // Helper function to get color hex from index
+        fun getColorHexByIndex(index: Int): String {
+            val color = getColorByIndex(index)
+            return String.format("#%06X", 0xFFFFFF and color.toArgb())
         }
     }
 }

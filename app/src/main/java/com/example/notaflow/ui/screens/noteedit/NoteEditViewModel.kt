@@ -1,5 +1,6 @@
 package com.example.notaflow.ui.screens.noteedit
 
+import android.util.Log
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontStyle
@@ -24,7 +25,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
-import android.util.Log
 
 @HiltViewModel
 class NoteEditViewModel @Inject constructor(
@@ -38,7 +38,6 @@ class NoteEditViewModel @Inject constructor(
 
     // Ensure the key "noteId" matches what you use in your Navigation graph
     private val noteIdFromNav: Long? = savedStateHandle.get<Long>("noteId")?.takeIf { it != -1L && it != 0L }
-
 
     private val contentHistory = mutableListOf<TextFieldValue>()
     private var currentHistoryIndex = -1
@@ -65,8 +64,6 @@ class NoteEditViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             try {
-                // Assuming GetNoteByIdUseCase takes Long, or Int if Note ID is Int
-                // If Note ID is Int, getNoteByIdUseCase param should be Int, and id should be cast
                 val note = getNoteByIdUseCase(id)
                 if (note != null) {
                     val htmlContent = note.content
@@ -75,12 +72,16 @@ class NoteEditViewModel @Inject constructor(
                         annotatedString = annotatedString,
                         selection = TextRange(annotatedString.text.length)
                     )
+
+                    // Convert color index to hex string
+                    val colorHex = Note.getColorHexByIndex(note.color)
+
                     _state.update {
                         it.copy(
                             note = note,
                             title = TextFieldValue(note.title),
                             content = contentFieldValue,
-                            noteColorHex = Note.getColorByIndex(note.color).toHexString(),
+                            noteColorHex = colorHex,
                             isPinned = note.isPinned,
                             isBookmarked = note.isBookmarked,
                             isLoading = false,
@@ -112,7 +113,6 @@ class NoteEditViewModel @Inject constructor(
     }
 
     // This is for cases where an external component might feed raw HTML/Markdown
-    // If your RichTextEditor directly uses TextFieldValue, this might be less used.
     fun onRichTextContentChangeViaRaw(rawContent: String) {
         val currentContentTfv = _state.value.content
         val newAnnotatedString = RichTextConverter.fromHtml(rawContent)
@@ -157,8 +157,10 @@ class NoteEditViewModel @Inject constructor(
                 _state.update { it.copy(error = "Cannot save empty note", saveCompleted = false) }
                 return@launch
             }
+
             _state.update { it.copy(isLoading = true) }
 
+            // Convert hex color to index in the noteColors list
             val colorObject = try {
                 Color(android.graphics.Color.parseColor(currentState.noteColorHex))
             } catch (e: Exception) {
@@ -207,20 +209,38 @@ class NoteEditViewModel @Inject constructor(
         val currentStyles = mutableSetOf<String>()
         val annotatedString = contentValue.annotatedString
 
-        val activeRange = if (selection.collapsed) TextRange(selection.start, selection.start +1) else selection
+        val activeRange = if (selection.collapsed) {
+            val start = selection.start.coerceAtMost(annotatedString.text.length)
+            val end = (start + 1).coerceAtMost(annotatedString.text.length)
+            TextRange(start, end)
+        } else {
+            selection
+        }
 
-        annotatedString.spanStyles.filter { it.intersect(activeRange).length > 0 }.forEach {
+        annotatedString.spanStyles.filter {
+            it.start < activeRange.end && it.end > activeRange.start
+        }.forEach {
             if (it.item.fontWeight == FontWeight.Bold) currentStyles.add("BOLD")
             if (it.item.fontStyle == FontStyle.Italic) currentStyles.add("ITALIC")
             it.item.textDecoration?.let { deco ->
                 if (deco.contains(TextDecoration.Underline)) currentStyles.add("UNDERLINE")
                 if (deco.contains(TextDecoration.LineThrough)) currentStyles.add("STRIKETHROUGH")
             }
-            if (annotatedString.getStringAnnotations("URL", it.start, it.end).any { ann -> ann.intersect(activeRange).length > 0}) currentStyles.add("LINK")
         }
-        annotatedString.paragraphStyles.filter { it.intersect(activeRange).length > 0 }.forEach {
+
+        // Process URL annotations separately
+        val urlAnnotations = annotatedString.getStringAnnotations("URL", activeRange.start, activeRange.end)
+        if (urlAnnotations.isNotEmpty()) {
+            currentStyles.add("LINK")
+        }
+
+        // Process paragraph styles
+        annotatedString.paragraphStyles.filter {
+            it.start < activeRange.end && it.end > activeRange.start
+        }.forEach {
             if (it.item.textIndent == TextIndent(16.sp, 16.sp)) currentStyles.add("BLOCKQUOTE")
         }
+
         _state.update { it.copy(currentFormatStyles = currentStyles) }
     }
 
@@ -231,29 +251,40 @@ class NoteEditViewModel @Inject constructor(
             RichTextFormatAction.UNDERLINE -> toggleStyle(RichTextFormatter.StyleType.UNDERLINE)
             RichTextFormatAction.STRIKETHROUGH -> toggleStyle(RichTextFormatter.StyleType.STRIKETHROUGH)
             RichTextFormatAction.BLOCKQUOTE -> toggleParagraphStyle(RichTextFormatter.ParagraphStyleType.BLOCKQUOTE)
-            RichTextFormatAction.LINK -> _state.update { it.copy(showLinkDialog = true) }
-            RichTextFormatAction.COLOR -> { /* Handled by color picker directly */ }
+            RichTextFormatAction.LINK -> {
+                _state.update { it.copy(showLinkDialog = true) }
+            }
+            RichTextFormatAction.COLOR -> {
+                // This is handled by setting the color via setTextColor method
+                // Do nothing here as the actual color will be passed separately
+            }
             RichTextFormatAction.UNDO -> undo()
             RichTextFormatAction.REDO -> redo()
         }
     }
 
-    fun applyTextColor(color: Color) {
+    // New method to set text color
+    fun setTextColor(color: Color) {
+        // Implementation depends on your text editor's capabilities
         val currentContent = _state.value.content
         val selection = currentContent.selection
+
         if (selection.collapsed && currentContent.composition == null) {
+            // Just update the color for future typing
             _state.update { it.copy(currentSelectedTextColor = color) }
             return
         }
+
+        // Apply color to selected text
         val newTextFieldValue = RichTextFormatter.formatColor(currentContent, color)
         onContentChange(newTextFieldValue)
         _state.update { it.copy(currentSelectedTextColor = color) }
     }
 
-    fun applyLink(url: String, text: String?) {
+    fun applyLink(url: String, text: String) {
         val currentContent = _state.value.content
         val selection = currentContent.selection
-        val linkTextToShow = if (text.isNullOrEmpty()) url else text
+        val linkTextToShow = if (text.isBlank()) url else text
         val newTextFieldValue = RichTextFormatter.applyLink(currentContent, url, linkTextToShow, selection)
         onContentChange(newTextFieldValue)
         _state.update { it.copy(showLinkDialog = false, currentLinkUrl = "", currentLinkText = "") }
@@ -272,11 +303,13 @@ class NoteEditViewModel @Inject constructor(
     }
 
     private fun toggleStyle(styleType: RichTextFormatter.StyleType) {
-        onContentChange(RichTextFormatter.toggleStyle(_state.value.content, styleType))
+        val newContent = RichTextFormatter.toggleStyle(_state.value.content, styleType)
+        onContentChange(newContent)
     }
 
     private fun toggleParagraphStyle(styleType: RichTextFormatter.ParagraphStyleType) {
-        onContentChange(RichTextFormatter.toggleParagraphStyle(_state.value.content, styleType))
+        val newContent = RichTextFormatter.toggleParagraphStyle(_state.value.content, styleType)
+        onContentChange(newContent)
     }
 
     private fun addToHistory(value: TextFieldValue) {

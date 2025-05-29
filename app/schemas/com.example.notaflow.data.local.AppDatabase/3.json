@@ -2,11 +2,11 @@
   "formatVersion": 1,
   "database": {
     "version": 3,
-    "identityHash": "abd9a92179f3b249a273a71fd8689b3d",
+    "identityHash": "d96ce7fe09efbb89c4ec543687ff144a",
     "entities": [
       {
         "tableName": "notes",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `title` TEXT NOT NULL, `content` TEXT NOT NULL, `createdTimestamp` INTEGER NOT NULL, `timestamp` INTEGER NOT NULL, `color` INTEGER NOT NULL, `isPinned` INTEGER NOT NULL, `isBookmarked` INTEGER NOT NULL, `isDeleted` INTEGER NOT NULL, `folderId` INTEGER)",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `title` TEXT NOT NULL, `content` TEXT NOT NULL, `createdTimestamp` INTEGER NOT NULL, `timestamp` INTEGER NOT NULL, `color` INTEGER NOT NULL, `isPinned` INTEGER NOT NULL, `isBookmarked` INTEGER NOT NULL, `isDeleted` INTEGER NOT NULL, `deletedTimestamp` INTEGER, `folderId` INTEGER)",
         "fields": [
           {
             "fieldPath": "id",
@@ -63,6 +63,12 @@
             "notNull": true
           },
           {
+            "fieldPath": "deletedTimestamp",
+            "columnName": "deletedTimestamp",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
             "fieldPath": "folderId",
             "columnName": "folderId",
             "affinity": "INTEGER",
@@ -82,7 +88,7 @@
     "views": [],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'abd9a92179f3b249a273a71fd8689b3d')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'd96ce7fe09efbb89c4ec543687ff144a')"
     ]
   }
 }

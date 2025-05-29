@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
@@ -19,13 +18,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.notaflow.data.local.entity.Note
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
+import java.util.Date
 
 @Composable
 fun NoteItem(
@@ -34,7 +32,8 @@ fun NoteItem(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val noteColor = Color(android.graphics.Color.parseColor(note.colorHex))
+    // Get color from Note's companion object using the color index
+    val noteColor = Note.getColorByIndex(note.color)
 
     Card(
         modifier = modifier
@@ -78,7 +77,7 @@ fun NoteItem(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "Last modified: ${formatDate(note.modifiedAt)}",
+                    text = "Last modified: ${formatTimestamp(note.timestamp)}",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                 )
@@ -87,7 +86,8 @@ fun NoteItem(
     }
 }
 
-private fun formatDate(date: Date): String {
+private fun formatTimestamp(timestamp: Long): String {
+    val date = Date(timestamp)
     val formatter = SimpleDateFormat("MMM dd, yyyy • HH:mm", Locale.getDefault())
     return formatter.format(date)
 }

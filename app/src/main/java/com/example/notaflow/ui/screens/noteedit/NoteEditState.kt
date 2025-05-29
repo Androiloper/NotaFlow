@@ -2,7 +2,7 @@ package com.example.notaflow.ui.screens.noteedit
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.TextFieldValue
-import com.example.notaflow.data.local.entity.Note // Ensure this import is correct
+import com.example.notaflow.data.local.entity.Note
 
 // Extension function to convert Color to Hex String (RRGGBB for simplicity, no alpha)
 fun Color.toHexString(): String {

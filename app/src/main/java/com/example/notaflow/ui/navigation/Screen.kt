@@ -8,7 +8,7 @@ sealed class Screen(val route: String) {
             return if (noteId != null) {
                 "note_edit?noteId=$noteId"
             } else {
-                "note_edit?noteId="
+                "note_edit?noteId=-1"
             }
         }
     }

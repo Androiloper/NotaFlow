@@ -68,7 +68,7 @@ fun AppNavigation(
                 }
             )
         ) { backStackEntry ->
-            val noteId = backStackEntry.arguments?.getLong("noteId")
+            val noteId = backStackEntry.arguments?.getLong("noteId") ?: -1L
             NoteEditScreen(
                 noteId = if (noteId != -1L) noteId else null,
                 onNavigateBack = {
