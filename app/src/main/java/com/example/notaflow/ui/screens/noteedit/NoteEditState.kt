@@ -2,7 +2,15 @@ package com.example.notaflow.ui.screens.noteedit
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.TextFieldValue
-import com.example.notaflow.data.local.entity.Note
+import com.example.notaflow.data.local.entity.Note // Ensure this import is correct
+
+// Extension function to convert Color to Hex String (RRGGBB for simplicity, no alpha)
+fun Color.toHexString(): String {
+    val red = (this.red * 255).toInt()
+    val green = (this.green * 255).toInt()
+    val blue = (this.blue * 255).toInt()
+    return String.format("#%02X%02X%02X", red, green, blue)
+}
 
 data class NoteEditState(
     val note: Note? = null,
@@ -13,7 +21,7 @@ data class NoteEditState(
     val isBookmarked: Boolean = false,
     val isLoading: Boolean = false,
     val error: String? = null,
-    val showColorPicker: Boolean = false, // Though not directly in VM errors, good to keep aligned
+    val showColorPicker: Boolean = false,
     val showLinkDialog: Boolean = false,
     val currentLinkUrl: String = "",
     val currentLinkText: String = "",
@@ -25,11 +33,3 @@ data class NoteEditState(
     val saveCompleted: Boolean = false,
     val isNewNote: Boolean = true
 )
-
-// Extension function to convert Color to Hex String (RRGGBB for simplicity, no alpha)
-fun Color.toHexString(): String {
-    val red = (this.red * 255).toInt()
-    val green = (this.green * 255).toInt()
-    val blue = (this.blue * 255).toInt()
-    return String.format("#%02X%02X%02X", red, green, blue)
-}

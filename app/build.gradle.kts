@@ -5,13 +5,21 @@ plugins {
     id("com.google.dagger.hilt.android")
 }
 
+// KSP arguments for Room schema location
+// This block should be at the root of your build.gradle.kts file
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+    // You can add other KSP arguments here if needed for other processors
+    // For example: arg("other.processor.option", "value")
+}
+
 android {
     namespace = "com.example.notaflow"
     compileSdk = 34
 
     defaultConfig {
         applicationId = "com.example.notaflow"
-        minSdk = 25 // Set to 25 due to potential library requirements (e.g., from previous errors or new rich text lib)
+        minSdk = 25 // Set to 25 due to potential library requirements
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
@@ -22,7 +30,7 @@ android {
         }
     }
 
-    // Room schema export using KSP
+    // Room schema export using KSP - generated sources
     applicationVariants.all {
         kotlin {
             sourceSets {
@@ -88,14 +96,6 @@ dependencies {
     // Room components
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
-    // implementation(libs.androidx.compose.material) // This implies a version catalog 'libs'
-    // If you have it defined, it's fine.
-    // Otherwise, specify the version directly or use the BOM.
-    // Assuming this was meant for androidx.compose.material:material
-    // which is usually covered by material3 or bom.
-    // If it's a specific artifact, ensure 'libs' is set up.
-    // For now, I'll comment it out if 'libs' isn't defined in this context.
-    // If you meant Material 1 components: implementation("androidx.compose.material:material")
     ksp("androidx.room:room-compiler:2.6.1")
 
     // Hilt for dependency injection
@@ -135,11 +135,5 @@ dependencies {
     implementation("com.jakewharton.timber:timber:5.0.1") // User specified version
 }
 
-// KSP arguments for Room schema location
-// This block should be at the root of your build.gradle.kts file, not inside android {} or dependencies {}
-tasks.withType<com.google.devtools.ksp.gradle.KspTask>().configureEach {
-    // Check if the task is related to Room, though often applying to all KSP tasks is fine
-    // if (!name.contains("Test", ignoreCase = true) ) { // Example to avoid test KSP tasks if needed
-    kspArgs["room.schemaLocation"] = "$projectDir/schemas"
-    // }
-}
+// Removed the incorrect tasks.withType<KspTask> block for kspArgs
+// The ksp { ... } block at the top level handles arguments now.

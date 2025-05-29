@@ -2,11 +2,11 @@
   "formatVersion": 1,
   "database": {
     "version": 3,
-    "identityHash": "6f23c6e85df4a7c57ab2821bb0b8c523",
+    "identityHash": "abd9a92179f3b249a273a71fd8689b3d",
     "entities": [
       {
         "tableName": "notes",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `title` TEXT NOT NULL, `content` TEXT NOT NULL, `colorHex` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `modifiedAt` INTEGER NOT NULL, `isDeleted` INTEGER NOT NULL, `deletedAt` INTEGER, `isRichText` INTEGER NOT NULL, `richTextContent` TEXT NOT NULL)",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `title` TEXT NOT NULL, `content` TEXT NOT NULL, `createdTimestamp` INTEGER NOT NULL, `timestamp` INTEGER NOT NULL, `color` INTEGER NOT NULL, `isPinned` INTEGER NOT NULL, `isBookmarked` INTEGER NOT NULL, `isDeleted` INTEGER NOT NULL, `folderId` INTEGER)",
         "fields": [
           {
             "fieldPath": "id",
@@ -27,20 +27,32 @@
             "notNull": true
           },
           {
-            "fieldPath": "colorHex",
-            "columnName": "colorHex",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "createdAt",
-            "columnName": "createdAt",
+            "fieldPath": "createdTimestamp",
+            "columnName": "createdTimestamp",
             "affinity": "INTEGER",
             "notNull": true
           },
           {
-            "fieldPath": "modifiedAt",
-            "columnName": "modifiedAt",
+            "fieldPath": "timestamp",
+            "columnName": "timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "color",
+            "columnName": "color",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isPinned",
+            "columnName": "isPinned",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isBookmarked",
+            "columnName": "isBookmarked",
             "affinity": "INTEGER",
             "notNull": true
           },
@@ -51,22 +63,10 @@
             "notNull": true
           },
           {
-            "fieldPath": "deletedAt",
-            "columnName": "deletedAt",
+            "fieldPath": "folderId",
+            "columnName": "folderId",
             "affinity": "INTEGER",
             "notNull": false
-          },
-          {
-            "fieldPath": "isRichText",
-            "columnName": "isRichText",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "richTextContent",
-            "columnName": "richTextContent",
-            "affinity": "TEXT",
-            "notNull": true
           }
         ],
         "primaryKey": {
@@ -82,7 +82,7 @@
     "views": [],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '6f23c6e85df4a7c57ab2821bb0b8c523')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'abd9a92179f3b249a273a71fd8689b3d')"
     ]
   }
 }

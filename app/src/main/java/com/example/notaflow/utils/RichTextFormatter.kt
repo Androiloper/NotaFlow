@@ -21,7 +21,7 @@ object RichTextFormatter {
     }
 
     enum class ParagraphStyleType {
-        BLOCKQUOTE // Add more like lists later
+        BLOCKQUOTE
     }
 
     fun toggleStyle(textFieldValue: TextFieldValue, styleType: StyleType): TextFieldValue {
@@ -36,57 +36,37 @@ object RichTextFormatter {
                 maxOf(range.start, selection.min) < minOf(range.end, selection.max)
             }
 
-            val styleAlreadyApplied = stylesInSelection.any { range ->
-                when (styleType) {
-                    StyleType.BOLD -> range.item.fontWeight == FontWeight.Bold
-                    StyleType.ITALIC -> range.item.fontStyle == FontStyle.Italic
-                    StyleType.UNDERLINE -> range.item.textDecoration?.contains(TextDecoration.Underline) == true
-                    StyleType.STRIKETHROUGH -> range.item.textDecoration?.contains(TextDecoration.LineThrough) == true
-                }
+            var isCurrentlyApplied = false
+            when (styleType) {
+                StyleType.BOLD -> isCurrentlyApplied = stylesInSelection.any { it.item.fontWeight == FontWeight.Bold }
+                StyleType.ITALIC -> isCurrentlyApplied = stylesInSelection.any { it.item.fontStyle == FontStyle.Italic }
+                StyleType.UNDERLINE -> isCurrentlyApplied = stylesInSelection.any { it.item.textDecoration?.contains(TextDecoration.Underline) == true }
+                StyleType.STRIKETHROUGH -> isCurrentlyApplied = stylesInSelection.any { it.item.textDecoration?.contains(TextDecoration.LineThrough) == true }
             }
 
-            if (styleAlreadyApplied) {
-                val neutralizingStyle = when (styleType) {
-                    StyleType.BOLD -> SpanStyle(fontWeight = FontWeight.Normal)
-                    StyleType.ITALIC -> SpanStyle(fontStyle = FontStyle.Normal)
-                    StyleType.UNDERLINE -> {
-                        val combinedCurrentDecorations = stylesInSelection
-                            .mapNotNull { it.item.textDecoration }
-                            .reduceOrNull { acc, deco -> acc + deco }
-                        val resultingDecoration = combinedCurrentDecorations?.minus(TextDecoration.Underline)
-                        SpanStyle(textDecoration = if (resultingDecoration == TextDecoration.None || resultingDecoration?.mask == 0) null else resultingDecoration)
-                    }
-                    StyleType.STRIKETHROUGH -> {
-                        val combinedCurrentDecorations = stylesInSelection
-                            .mapNotNull { it.item.textDecoration }
-                            .reduceOrNull { acc, deco -> acc + deco }
-                        val resultingDecoration = combinedCurrentDecorations?.minus(TextDecoration.LineThrough)
-                        SpanStyle(textDecoration = if (resultingDecoration == TextDecoration.None || resultingDecoration?.mask == 0) null else resultingDecoration)
+            val targetStyle: SpanStyle = when (styleType) {
+                StyleType.BOLD -> if (isCurrentlyApplied) SpanStyle(fontWeight = FontWeight.Normal) else SpanStyle(fontWeight = FontWeight.Bold)
+                StyleType.ITALIC -> if (isCurrentlyApplied) SpanStyle(fontStyle = FontStyle.Normal) else SpanStyle(fontStyle = FontStyle.Italic)
+                StyleType.UNDERLINE -> {
+                    val currentGlobalDecoration = stylesInSelection.mapNotNull { it.item.textDecoration }.fold(null as TextDecoration?) { acc, current -> acc?.plus(current) ?: current }
+                    if (isCurrentlyApplied) {
+                        val newDecoration = currentGlobalDecoration?.minus(TextDecoration.Underline)
+                        SpanStyle(textDecoration = if (newDecoration?.mask == 0) null else newDecoration)
+                    } else {
+                        SpanStyle(textDecoration = (currentGlobalDecoration ?: TextDecoration.None).plus(TextDecoration.Underline))
                     }
                 }
-                addStyle(neutralizingStyle, selection.min, selection.max)
-            } else {
-                // Add the style
-                val styleToAdd = when (styleType) {
-                    StyleType.BOLD -> SpanStyle(fontWeight = FontWeight.Bold)
-                    StyleType.ITALIC -> SpanStyle(fontStyle = FontStyle.Italic)
-                    StyleType.UNDERLINE -> {
-                        val combinedCurrentDecorations = stylesInSelection
-                            .mapNotNull { it.item.textDecoration }
-                            .reduceOrNull { acc, deco -> acc + deco }
-                        val finalDecoration = combinedCurrentDecorations?.plus(TextDecoration.Underline) ?: TextDecoration.Underline
-                        SpanStyle(textDecoration = finalDecoration)
-                    }
-                    StyleType.STRIKETHROUGH -> {
-                        val combinedCurrentDecorations = stylesInSelection
-                            .mapNotNull { it.item.textDecoration }
-                            .reduceOrNull { acc, deco -> acc + deco }
-                        val finalDecoration = combinedCurrentDecorations?.plus(TextDecoration.LineThrough) ?: TextDecoration.LineThrough
-                        SpanStyle(textDecoration = finalDecoration)
+                StyleType.STRIKETHROUGH -> {
+                    val currentGlobalDecoration = stylesInSelection.mapNotNull { it.item.textDecoration }.fold(null as TextDecoration?) { acc, current -> acc?.plus(current) ?: current }
+                    if (isCurrentlyApplied) {
+                        val newDecoration = currentGlobalDecoration?.minus(TextDecoration.LineThrough)
+                        SpanStyle(textDecoration = if (newDecoration?.mask == 0) null else newDecoration)
+                    } else {
+                        SpanStyle(textDecoration = (currentGlobalDecoration ?: TextDecoration.None).plus(TextDecoration.LineThrough))
                     }
                 }
-                addStyle(styleToAdd, selection.min, selection.max)
             }
+            addStyle(targetStyle, selection.min, selection.max)
         }
         return textFieldValue.copy(annotatedString = newAnnotatedString, selection = selection)
     }
@@ -103,27 +83,28 @@ object RichTextFormatter {
     }
 
     fun applyLink(textFieldValue: TextFieldValue, url: String, text: String, selection: TextRange): TextFieldValue {
+        val currentAnnotatedString = textFieldValue.annotatedString
         val newAnnotatedString = buildAnnotatedString {
-            // It's important to qualify 'this' if there's any ambiguity,
-            // but usually it's inferred correctly in the buildAnnotatedString lambda.
             val builder: AnnotatedString.Builder = this
+            builder.append(currentAnnotatedString)
 
-            builder.append(textFieldValue.annotatedString)
-            val start: Int
-            val end: Int
+            val actualStart: Int
+            val actualEnd: Int
+
             if (selection.collapsed) {
                 builder.insert(selection.start, text)
-                start = selection.start
-                end = selection.start + text.length
+                actualStart = selection.start
+                actualEnd = selection.start + text.length
             } else {
                 builder.replace(selection.min, selection.max, text)
-                start = selection.min
-                end = selection.min + text.length
+                actualStart = selection.min
+                actualEnd = selection.min + text.length
             }
-            builder.addStringAnnotation("URL", url, start, end)
-            builder.addStyle(SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline), start, end)
+
+            builder.addStringAnnotation("URL", url, actualStart, actualEnd)
+            builder.addStyle(SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline), actualStart, actualEnd)
         }
-        return textFieldValue.copy(annotatedString = newAnnotatedString, selection = TextRange(end))
+        return textFieldValue.copy(annotatedString = newAnnotatedString, selection = TextRange(actualEnd))
     }
 
 
@@ -137,6 +118,9 @@ object RichTextFormatter {
         }
         var paraEnd = selection.max
         while (paraEnd < currentAnnotatedString.text.length && currentAnnotatedString.text[paraEnd] != '\n') {
+            paraEnd++
+        }
+        if (paraEnd < currentAnnotatedString.text.length && currentAnnotatedString.text[paraEnd] == '\n') {
             paraEnd++
         }
 
@@ -158,7 +142,7 @@ object RichTextFormatter {
                 addStyle(styleToToggle, paraStart, paraEnd)
             }
         }
-        return textFieldValue.copy(annotatedString = newAnnotatedString, selection = TextRange(paraStart, paraEnd))
+        return textFieldValue.copy(annotatedString = newAnnotatedString, selection = selection)
     }
 
     fun fixMarkdownErrors(markdownContent: String): String {

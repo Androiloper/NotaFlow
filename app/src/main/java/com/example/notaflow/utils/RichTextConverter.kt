@@ -47,7 +47,7 @@ object RichTextConverter {
     private val underlineRegex = Regex("""<u>(.*?)</u>""", RegexOption.DOT_MATCHES_ALL)
     private val strikethroughRegex = Regex("""<s>(.*?)</s>""", RegexOption.DOT_MATCHES_ALL)
     private val blockquoteRegex = Regex("""<blockquote>(.*?)</blockquote>""", RegexOption.DOT_MATCHES_ALL)
-    private val fontColorRegex = Regex("""<font color="#([0-9a-fA-F]{6,8})">(.*?)</font>""", RegexOption.DOT_MATCHES_ALL)
+    private val fontColorRegex = Regex("""<font color="(#[0-9a-fA-F]{6,8})">(.*?)</font>""", RegexOption.DOT_MATCHES_ALL) // Adjusted to capture #
     private val linkRegex = Regex("""<a href="(.*?)">(.*?)</a>""", RegexOption.DOT_MATCHES_ALL)
 
 
@@ -81,10 +81,12 @@ object RichTextConverter {
                 tagMap.getOrPut(range.end) { mutableListOf() }.add(STRIKETHROUGH_TAG_CLOSE)
             }
             if (style.color != Color.Unspecified) {
-                val colorValue = style.color.value
-                // Format as RRGGBB, ignoring alpha for standard HTML color
-                val colorHex = String.format("%06X", colorValue and 16777215u)
-                tagMap.getOrPut(range.start) { mutableListOf() }.add(fontColorTagOpen("#$colorHex"))
+                // Convert Compose Color to hex string #RRGGBB
+                val red = (style.color.red * 255).toInt()
+                val green = (style.color.green * 255).toInt()
+                val blue = (style.color.blue * 255).toInt()
+                val colorHex = String.format("#%02X%02X%02X", red, green, blue)
+                tagMap.getOrPut(range.start) { mutableListOf() }.add(fontColorTagOpen(colorHex))
                 tagMap.getOrPut(range.end) { mutableListOf() }.add(FONT_COLOR_TAG_CLOSE)
             }
         }
@@ -94,27 +96,30 @@ object RichTextConverter {
         }
         paragraphs.forEach { range ->
             // Example for blockquote based on textIndent
-            if (range.item.textIndent == TextIndent(16.sp, 16.sp)) {
+            if (range.item.textIndent == TextIndent(16.sp, 16.sp)) { // Ensure this matches how blockquotes are styled
                 tagMap.getOrPut(range.start) { mutableListOf() }.add(BLOCKQUOTE_TAG_OPEN)
                 tagMap.getOrPut(range.end) { mutableListOf() }.add(BLOCKQUOTE_TAG_CLOSE)
             }
         }
 
-        // Iterate through text, applying tags at boundaries
-        // This simplified logic handles basic cases but might not perfectly reconstruct complex nested HTML.
+        val sortedIndices = tagMap.keys.sorted()
+        var lastProcessedCharIndex = -1
+
         for (i in text.indices) {
-            // Append closing tags first (in reverse order of typical opening)
-            // A proper stack-based approach would be more robust for perfect nesting.
+            // Process tags for index i
             tagMap[i]?.filter { it.startsWith("</") }?.reversed()?.forEach { stringBuilder.append(it) }
             tagMap[i]?.filterNot { it.startsWith("</") }?.forEach { stringBuilder.append(it) }
             stringBuilder.append(text[i])
+            lastProcessedCharIndex = i
         }
-        // Append any closing tags at the very end of the text
-        tagMap[text.length]?.filter { it.startsWith("</") }?.reversed()?.forEach { stringBuilder.append(it) }
-        // Opening tags at text.length should ideally not happen if spans are correctly bounded.
 
-        Log.d(TAG, "toHtml Output: ${stringBuilder.toString()}")
-        return stringBuilder.toString().replace("\n", "<br>") // Basic newline handling
+        // Append any tags that are at the very end of the string (after the last character)
+        tagMap[text.length]?.filter { it.startsWith("</") }?.reversed()?.forEach { stringBuilder.append(it) }
+        tagMap[text.length]?.filterNot { it.startsWith("</") }?.forEach { stringBuilder.append(it) }
+
+
+        // Log.d(TAG, "toHtml Output: ${stringBuilder.toString()}")
+        return stringBuilder.toString().replace("\n", "<br>")
     }
 
     /**
@@ -122,161 +127,118 @@ object RichTextConverter {
      */
     fun fromHtml(html: String): AnnotatedString {
         if (html.isEmpty()) return AnnotatedString("")
-        Log.d(TAG, "fromHtml Input: $html")
+        // Log.d(TAG, "fromHtml Input: $html")
 
         val textWithNewlines = html.replace("<br>", "\n", ignoreCase = true).replace("<br/>", "\n", ignoreCase = true)
 
-        // Corrected: Use Html.fromHtml with explicit flags
         val spanned: Spanned = Html.fromHtml(textWithNewlines, Html.FROM_HTML_MODE_LEGACY)
 
         return buildAnnotatedString {
             append(spanned.toString())
             val plainText = spanned.toString()
 
-            // Apply styles based on regex matches on the original HTML (textWithNewlines)
-            // This approach has limitations with accurately mapping indices if tags are heavily nested or overlapping.
-            // A sequential parser would be more robust.
-
-            // Bold
             boldRegex.findAll(textWithNewlines).forEach { matchResult ->
-                val (content) = matchResult.destructured
-                // Corrected: Use Html.fromHtml with explicit flags
                 findAndApplyStyle(plainText, textWithNewlines, matchResult, SpanStyle(fontWeight = FontWeight.Bold))
             }
-            // Italic
             italicRegex.findAll(textWithNewlines).forEach { matchResult ->
-                val (content) = matchResult.destructured
                 findAndApplyStyle(plainText, textWithNewlines, matchResult, SpanStyle(fontStyle = FontStyle.Italic))
             }
-            // Underline
             underlineRegex.findAll(textWithNewlines).forEach { matchResult ->
-                val (content) = matchResult.destructured
                 findAndApplyStyle(plainText, textWithNewlines, matchResult, SpanStyle(textDecoration = TextDecoration.Underline))
             }
-            // Strikethrough
             strikethroughRegex.findAll(textWithNewlines).forEach { matchResult ->
-                val (content) = matchResult.destructured
                 findAndApplyStyle(plainText, textWithNewlines, matchResult, SpanStyle(textDecoration = TextDecoration.LineThrough))
             }
-
-            // Font Color
             fontColorRegex.findAll(textWithNewlines).forEach { matchResult ->
-                val (colorHexWithHash, content) = matchResult.destructured
+                val (colorHexWithHash, _) = matchResult.destructured // content is groupValues[2]
                 try {
-                    // Ensure colorHexWithHash includes '#' for parsing
-                    val colorString = if (colorHexWithHash.startsWith("#")) colorHexWithHash else "#$colorHexWithHash"
-                    val color = Color(android.graphics.Color.parseColor(colorString))
+                    val color = Color(android.graphics.Color.parseColor(colorHexWithHash)) // colorHexWithHash already has #
                     findAndApplyStyle(plainText, textWithNewlines, matchResult, SpanStyle(color = color))
                 } catch (e: IllegalArgumentException) {
                     Log.e(TAG, "Invalid color hex: $colorHexWithHash", e)
                 }
             }
-
-            // Links
             linkRegex.findAll(textWithNewlines).forEach { matchResult ->
                 val (url, linkTextHtml) = matchResult.destructured
-                // Corrected: Use Html.fromHtml with explicit flags
                 val cleanLinkText = Html.fromHtml(linkTextHtml, Html.FROM_HTML_MODE_LEGACY).toString()
+                val foundIndices = findTextOccurrences(plainText, cleanLinkText) // Get all occurrences
 
-                var searchStartIndexInPlainText = 0
-                val originalMatchStartIndex = matchResult.range.first
-
-                // Try to find the plain text version of linkTextHtml starting from a similar position
-                // This is an approximation.
-                val estimatedPlainTextStartIndex = plainText.length * originalMatchStartIndex / textWithNewlines.length
-
-                val foundPlainTextIndex = plainText.indexOf(cleanLinkText, startIndex = maxOf(0, estimatedPlainTextStartIndex - cleanLinkText.length - 10))
-                    .takeIf { it != -1} ?: plainText.indexOf(cleanLinkText) // Fallback to search from start
-
-
-                if (foundPlainTextIndex != -1) {
-                    val start = foundPlainTextIndex
-                    val end = foundPlainTextIndex + cleanLinkText.length
+                // This is a heuristic: try to match based on original HTML position to disambiguate
+                // For simplicity, applying to all found occurrences if not easily disambiguated
+                foundIndices.forEach { index ->
                     try {
-                        addStyle(SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline), start, end)
-                        addStringAnnotation("URL", url, start, end)
+                        addStyle(SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline), index, index + cleanLinkText.length)
+                        addStringAnnotation("URL", url, index, index + cleanLinkText.length)
                     } catch (e: Exception) {
                         Log.e(TAG, "Error applying link style for '$cleanLinkText': ${e.message}")
                     }
-                } else {
-                    Log.w(TAG, "Could not accurately map link text '$cleanLinkText' from HTML to plain text.")
                 }
             }
-
-            // Blockquotes (ParagraphStyle)
             blockquoteRegex.findAll(textWithNewlines).forEach { matchResult ->
                 val (contentHtml) = matchResult.destructured
-                // Corrected: Use Html.fromHtml with explicit flags
                 val cleanContent = Html.fromHtml(contentHtml, Html.FROM_HTML_MODE_LEGACY).toString()
-
-                // Similar logic to links for finding the plain text content
-                var searchStartIndexInPlainText = 0
-                val originalMatchStartIndex = matchResult.range.first
-                val estimatedPlainTextStartIndex = plainText.length * originalMatchStartIndex / textWithNewlines.length
-
-                val foundPlainTextIndex = plainText.indexOf(cleanContent, startIndex = maxOf(0, estimatedPlainTextStartIndex - cleanContent.length - 10))
-                    .takeIf { it != -1} ?: plainText.indexOf(cleanContent)
-
-
-                if (foundPlainTextIndex != -1) {
-                    val start = foundPlainTextIndex
-                    val end = foundPlainTextIndex + cleanContent.length
-                    // Basic check for paragraph boundaries (start of text or after newline)
-                    // This is a simplification.
-                    if ((start == 0 || plainText.getOrNull(start - 1) == '\n') &&
-                        (end == plainText.length || plainText.getOrNull(end) == '\n' || plainText.getOrNull(end-1) == '\n')) {
+                val foundIndices = findTextOccurrences(plainText, cleanContent)
+                foundIndices.forEach { index ->
+                    if ((index == 0 || plainText.getOrNull(index - 1) == '\n')) {
                         try {
-                            addStyle(ParagraphStyle(textIndent = TextIndent(16.sp, 16.sp)), start, end)
+                            // ParagraphStyle applies to [start, end), ensure end is at newline or end of text for proper paragraph
+                            var paraEnd = index + cleanContent.length
+                            if (paraEnd < plainText.length && plainText[paraEnd] == '\n') {
+                                paraEnd++ // Include the newline for the paragraph
+                            } else if (paraEnd == plainText.length) {
+                                // At the end of the text
+                            } else {
+                                // Content doesn't end with a newline, might not be a full paragraph
+                                // For simplicity, still apply if it's a block
+                            }
+                            addStyle(ParagraphStyle(textIndent = TextIndent(16.sp, 16.sp)), index, paraEnd)
                         } catch (e: Exception) {
                             Log.e(TAG, "Error applying blockquote style for '$cleanContent': ${e.message}")
                         }
-                    } else {
-                        Log.w(TAG, "Blockquote content '$cleanContent' not on clear paragraph boundary.")
                     }
-                } else {
-                    Log.w(TAG, "Could not accurately map blockquote content '$cleanContent' from HTML to plain text.")
                 }
             }
         }
     }
 
-    // Helper to find content in plainText based on original HTML match, and apply style
+    // Helper to find all occurrences of a substring
+    private fun findTextOccurrences(text: String, sub: String): List<Int> {
+        if (sub.isEmpty()) return emptyList()
+        val indices = mutableListOf<Int>()
+        var startIndex = 0
+        while (startIndex < text.length) {
+            val index = text.indexOf(sub, startIndex)
+            if (index != -1) {
+                indices.add(index)
+                startIndex = index + sub.length
+            } else {
+                break
+            }
+        }
+        return indices
+    }
+
+
     private fun AnnotatedString.Builder.findAndApplyStyle(
         plainText: String,
         originalHtml: String,
         htmlMatchResult: MatchResult,
         styleToApply: SpanStyle
     ) {
-        val htmlContent = htmlMatchResult.groupValues[1] // The content within the tags
-        // Corrected: Use Html.fromHtml with explicit flags
+        val htmlContent = htmlMatchResult.groupValues[1]
         val plainContent = Html.fromHtml(htmlContent, Html.FROM_HTML_MODE_LEGACY).toString()
         if (plainContent.isEmpty()) return
 
-        // Attempt to locate plainContent in plainText, using original match position as a hint
-        val originalMatchStartIndex = htmlMatchResult.range.first
-
-        // Estimate where the plainContent might start in plainText
-        // This is a heuristic and not perfectly accurate for complex HTML.
-        var searchStartIndex = 0
-        if (originalHtml.isNotEmpty()) { // Avoid division by zero
-            searchStartIndex = (plainText.length * originalMatchStartIndex) / originalHtml.length
-            searchStartIndex = maxOf(0, searchStartIndex - plainContent.length) // Search a bit before the estimate
-        }
-
-
-        var foundIndex = plainText.indexOf(plainContent, startIndex = searchStartIndex)
-        if (foundIndex == -1) { // If not found near estimate, search from beginning
-            foundIndex = plainText.indexOf(plainContent)
-        }
-
-        if (foundIndex != -1) {
+        val foundIndices = findTextOccurrences(plainText, plainContent)
+        // Basic heuristic: if only one match in plainText, use it.
+        // Otherwise, this simple version might misapply styles if plainContent is common.
+        // A more advanced version would use the original HTML match position as a stronger hint.
+        foundIndices.forEach { index ->
             try {
-                addStyle(styleToApply, foundIndex, foundIndex + plainContent.length)
+                addStyle(styleToApply, index, index + plainContent.length)
             } catch (e: Exception) {
-                Log.e(TAG, "Error in findAndApplyStyle for '$plainContent': ${e.message} at index $foundIndex")
+                Log.e(TAG, "Error in findAndApplyStyle for '$plainContent': ${e.message} at index $index")
             }
-        } else {
-            Log.w(TAG, "Could not accurately map HTML content '$htmlContent' (plain: '$plainContent') to plain text.")
         }
     }
 }

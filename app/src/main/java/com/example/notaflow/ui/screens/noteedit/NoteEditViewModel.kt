@@ -1,8 +1,6 @@
 package com.example.notaflow.ui.screens.noteedit
 
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -16,7 +14,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.notaflow.data.local.entity.Note
 import com.example.notaflow.domain.usecase.GetNoteByIdUseCase
 import com.example.notaflow.domain.usecase.SaveNoteUseCase
-import com.example.notaflow.ui.components.RichTextFormatAction // Ensure this is the correct import
+import com.example.notaflow.ui.components.RichTextFormatAction
 import com.example.notaflow.utils.RichTextConverter
 import com.example.notaflow.utils.RichTextFormatter
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -38,24 +36,26 @@ class NoteEditViewModel @Inject constructor(
     private val _state = MutableStateFlow(NoteEditState())
     val state: StateFlow<NoteEditState> = _state.asStateFlow()
 
-    private val noteId: Long? = savedStateHandle.get<Long>("noteId")?.takeIf { it != -1L }
+    // Ensure the key "noteId" matches what you use in your Navigation graph
+    private val noteIdFromNav: Long? = savedStateHandle.get<Long>("noteId")?.takeIf { it != -1L && it != 0L }
+
 
     private val contentHistory = mutableListOf<TextFieldValue>()
     private var currentHistoryIndex = -1
     private val maxHistorySize = 50
 
     init {
-        if (noteId != null && noteId != 0L) {
-            _state.update { it.copy(isNewNote = false) } // Set isNewNote before loading
-            loadNote(noteId)
+        if (noteIdFromNav != null) {
+            _state.update { it.copy(isNewNote = false) }
+            loadNote(noteIdFromNav)
         } else {
             val initialContent = TextFieldValue("")
             addToHistory(initialContent)
             _state.update {
                 it.copy(
-                    // noteColorHex is already initialized in NoteEditState with default
                     content = initialContent,
                     isNewNote = true
+                    // noteColorHex is already initialized in NoteEditState
                 )
             }
         }
@@ -65,7 +65,8 @@ class NoteEditViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             try {
-                // Corrected: Pass id as Long if GetNoteByIdUseCase expects Long
+                // Assuming GetNoteByIdUseCase takes Long, or Int if Note ID is Int
+                // If Note ID is Int, getNoteByIdUseCase param should be Int, and id should be cast
                 val note = getNoteByIdUseCase(id)
                 if (note != null) {
                     val htmlContent = note.content
@@ -83,7 +84,7 @@ class NoteEditViewModel @Inject constructor(
                             isPinned = note.isPinned,
                             isBookmarked = note.isBookmarked,
                             isLoading = false,
-                            isRichText = true // Assume loaded notes are rich text
+                            isRichText = true
                         )
                     }
                     contentHistory.clear()
@@ -110,21 +111,21 @@ class NoteEditViewModel @Inject constructor(
         updateCurrentFormatStyles(newContent)
     }
 
-    fun onRichTextContentChange(markdownOrHtmlContent: String) {
+    // This is for cases where an external component might feed raw HTML/Markdown
+    // If your RichTextEditor directly uses TextFieldValue, this might be less used.
+    fun onRichTextContentChangeViaRaw(rawContent: String) {
         val currentContentTfv = _state.value.content
-        val newAnnotatedString = RichTextConverter.fromHtml(markdownOrHtmlContent)
+        val newAnnotatedString = RichTextConverter.fromHtml(rawContent)
 
-        // Only update if the content or its primary styling attributes actually changed
-        // This helps prevent unnecessary recompositions or history entries.
         if (currentContentTfv.annotatedString.text != newAnnotatedString.text ||
             currentContentTfv.annotatedString.spanStyles != newAnnotatedString.spanStyles ||
             currentContentTfv.annotatedString.paragraphStyles != newAnnotatedString.paragraphStyles) {
 
             val newContentTfvUpdated = currentContentTfv.copy(
                 annotatedString = newAnnotatedString,
-                selection = TextRange(newAnnotatedString.length) // Reset selection to end
+                selection = TextRange(newAnnotatedString.length)
             )
-            onContentChange(newContentTfvUpdated)
+            onContentChange(newContentTfvUpdated) // Use the main onContentChange
         }
     }
 
@@ -135,22 +136,14 @@ class NoteEditViewModel @Inject constructor(
     fun setRichTextEnabled(enabled: Boolean) {
         _state.update { it.copy(isRichText = enabled) }
         if (!enabled) {
-            // From Rich to Plain: Convert AnnotatedString to plain text.
             val plainText = _state.value.content.annotatedString.text
             val newContent = TextFieldValue(plainText, selection = TextRange(plainText.length))
-            // Update content without adding to rich text history if it's just a format switch
             _state.update { it.copy(content = newContent) }
-            // Optionally, clear rich text history or handle it differently
             contentHistory.clear()
-            addToHistory(newContent) // Add the plain text version as the new base
+            addToHistory(newContent)
             updateCurrentFormatStyles(newContent)
-
         } else {
-            // From Plain to Rich: The current TextFieldValue might already contain some basic
-            // styling if it was loaded from HTML. If it's purely plain, it will render as such.
-            // No explicit conversion needed here unless you have a separate plain text source.
-            // Ensure history reflects the current state.
-            addToHistory(_state.value.content)
+            addToHistory(_state.value.content) // Re-add to history if switching back to rich
         }
     }
 
@@ -167,8 +160,7 @@ class NoteEditViewModel @Inject constructor(
             _state.update { it.copy(isLoading = true) }
 
             val colorObject = try {
-                val parsedColorInt = android.graphics.Color.parseColor(currentState.noteColorHex)
-                Color(parsedColorInt)
+                Color(android.graphics.Color.parseColor(currentState.noteColorHex))
             } catch (e: Exception) {
                 Log.w("NoteEditViewModel", "Invalid color hex: ${currentState.noteColorHex}, using default.")
                 Note.noteColors.first()
@@ -181,7 +173,9 @@ class NoteEditViewModel @Inject constructor(
                 timestamp = System.currentTimeMillis(),
                 color = colorIndex,
                 isPinned = currentState.isPinned,
-                isBookmarked = currentState.isBookmarked
+                isBookmarked = currentState.isBookmarked,
+                isDeleted = currentState.note.isDeleted, // Preserve existing delete state
+                deletedTimestamp = currentState.note.deletedTimestamp // Preserve existing delete timestamp
             ) ?: Note(
                 title = title,
                 content = contentHtml,
@@ -189,7 +183,9 @@ class NoteEditViewModel @Inject constructor(
                 timestamp = System.currentTimeMillis(),
                 color = colorIndex,
                 isPinned = currentState.isPinned,
-                isBookmarked = currentState.isBookmarked
+                isBookmarked = currentState.isBookmarked,
+                isDeleted = false, // New notes are not deleted
+                deletedTimestamp = null
             )
 
             try {
@@ -211,34 +207,19 @@ class NoteEditViewModel @Inject constructor(
         val currentStyles = mutableSetOf<String>()
         val annotatedString = contentValue.annotatedString
 
-        if (selection.collapsed) {
-            annotatedString.spanStyles.filter { it.start <= selection.start && it.end >= selection.start }.forEach {
-                if (it.item.fontWeight == FontWeight.Bold) currentStyles.add("BOLD")
-                if (it.item.fontStyle == FontStyle.Italic) currentStyles.add("ITALIC")
-                it.item.textDecoration?.let { deco ->
-                    if (deco.contains(TextDecoration.Underline)) currentStyles.add("UNDERLINE")
-                    if (deco.contains(TextDecoration.LineThrough)) currentStyles.add("STRIKETHROUGH")
-                }
-                if (annotatedString.getStringAnnotations("URL", it.start, it.end).isNotEmpty()) currentStyles.add("LINK")
+        val activeRange = if (selection.collapsed) TextRange(selection.start, selection.start +1) else selection
+
+        annotatedString.spanStyles.filter { it.intersect(activeRange).length > 0 }.forEach {
+            if (it.item.fontWeight == FontWeight.Bold) currentStyles.add("BOLD")
+            if (it.item.fontStyle == FontStyle.Italic) currentStyles.add("ITALIC")
+            it.item.textDecoration?.let { deco ->
+                if (deco.contains(TextDecoration.Underline)) currentStyles.add("UNDERLINE")
+                if (deco.contains(TextDecoration.LineThrough)) currentStyles.add("STRIKETHROUGH")
             }
-            annotatedString.paragraphStyles.filter { it.start <= selection.start && it.end >= selection.start }.forEach {
-                if (it.item.textIndent == TextIndent(16.sp, 16.sp)) currentStyles.add("BLOCKQUOTE")
-            }
-        } else {
-            // For a selection, a style is "active" if it's present anywhere in the selection.
-            // More sophisticated logic could check if it's uniformly applied.
-            annotatedString.spanStyles.filter { maxOf(it.start, selection.min) < minOf(it.end, selection.max) }.forEach {
-                if (it.item.fontWeight == FontWeight.Bold) currentStyles.add("BOLD")
-                if (it.item.fontStyle == FontStyle.Italic) currentStyles.add("ITALIC")
-                it.item.textDecoration?.let { deco ->
-                    if (deco.contains(TextDecoration.Underline)) currentStyles.add("UNDERLINE")
-                    if (deco.contains(TextDecoration.LineThrough)) currentStyles.add("STRIKETHROUGH")
-                }
-                if (annotatedString.getStringAnnotations("URL", it.start, it.end).isNotEmpty()) currentStyles.add("LINK")
-            }
-            annotatedString.paragraphStyles.filter { maxOf(it.start, selection.min) < minOf(it.end, selection.max) }.forEach {
-                if (it.item.textIndent == TextIndent(16.sp, 16.sp)) currentStyles.add("BLOCKQUOTE")
-            }
+            if (annotatedString.getStringAnnotations("URL", it.start, it.end).any { ann -> ann.intersect(activeRange).length > 0}) currentStyles.add("LINK")
+        }
+        annotatedString.paragraphStyles.filter { it.intersect(activeRange).length > 0 }.forEach {
+            if (it.item.textIndent == TextIndent(16.sp, 16.sp)) currentStyles.add("BLOCKQUOTE")
         }
         _state.update { it.copy(currentFormatStyles = currentStyles) }
     }
@@ -251,7 +232,7 @@ class NoteEditViewModel @Inject constructor(
             RichTextFormatAction.STRIKETHROUGH -> toggleStyle(RichTextFormatter.StyleType.STRIKETHROUGH)
             RichTextFormatAction.BLOCKQUOTE -> toggleParagraphStyle(RichTextFormatter.ParagraphStyleType.BLOCKQUOTE)
             RichTextFormatAction.LINK -> _state.update { it.copy(showLinkDialog = true) }
-            RichTextFormatAction.COLOR -> { /* This case might be redundant if color selection directly calls applyTextColor */ }
+            RichTextFormatAction.COLOR -> { /* Handled by color picker directly */ }
             RichTextFormatAction.UNDO -> undo()
             RichTextFormatAction.REDO -> redo()
         }
@@ -260,11 +241,8 @@ class NoteEditViewModel @Inject constructor(
     fun applyTextColor(color: Color) {
         val currentContent = _state.value.content
         val selection = currentContent.selection
-        if (selection.collapsed && currentContent.composition == null) { // Apply to typing attributes if not composing
+        if (selection.collapsed && currentContent.composition == null) {
             _state.update { it.copy(currentSelectedTextColor = color) }
-            // To make future typed text have this color, you might need to adjust how TextField handles this.
-            // Often, this involves pre-setting a span that new characters will inherit.
-            // For simplicity, we're just updating the state for the color picker's visual feedback.
             return
         }
         val newTextFieldValue = RichTextFormatter.formatColor(currentContent, color)
@@ -275,7 +253,7 @@ class NoteEditViewModel @Inject constructor(
     fun applyLink(url: String, text: String?) {
         val currentContent = _state.value.content
         val selection = currentContent.selection
-        val linkTextToShow = text ?: url // Default to URL if text is null/empty
+        val linkTextToShow = if (text.isNullOrEmpty()) url else text
         val newTextFieldValue = RichTextFormatter.applyLink(currentContent, url, linkTextToShow, selection)
         onContentChange(newTextFieldValue)
         _state.update { it.copy(showLinkDialog = false, currentLinkUrl = "", currentLinkText = "") }
@@ -294,25 +272,20 @@ class NoteEditViewModel @Inject constructor(
     }
 
     private fun toggleStyle(styleType: RichTextFormatter.StyleType) {
-        val currentContent = _state.value.content
-        val newTextFieldValue = RichTextFormatter.toggleStyle(currentContent, styleType)
-        onContentChange(newTextFieldValue)
+        onContentChange(RichTextFormatter.toggleStyle(_state.value.content, styleType))
     }
 
     private fun toggleParagraphStyle(styleType: RichTextFormatter.ParagraphStyleType) {
-        val currentContent = _state.value.content
-        val newTextFieldValue = RichTextFormatter.toggleParagraphStyle(currentContent, styleType)
-        onContentChange(newTextFieldValue)
+        onContentChange(RichTextFormatter.toggleParagraphStyle(_state.value.content, styleType))
     }
 
     private fun addToHistory(value: TextFieldValue) {
-        // If we undo and then type, clear the "redo" future
         if (currentHistoryIndex < contentHistory.size - 1) {
             contentHistory.subList(currentHistoryIndex + 1, contentHistory.size).clear()
         }
         contentHistory.add(value)
         if (contentHistory.size > maxHistorySize) {
-            contentHistory.removeAt(0) // Keep history size bounded
+            contentHistory.removeAt(0)
         }
         currentHistoryIndex = contentHistory.size - 1
         updateUndoRedoState()
@@ -321,20 +294,20 @@ class NoteEditViewModel @Inject constructor(
     private fun undo() {
         if (canUndo()) {
             currentHistoryIndex--
-            val previousState = contentHistory[currentHistoryIndex]
-            _state.update { it.copy(content = previousState) } // Directly update content
+            val previousStateContent = contentHistory[currentHistoryIndex]
+            _state.update { it.copy(content = previousStateContent) }
             updateUndoRedoState()
-            updateCurrentFormatStyles(previousState) // Update toolbar based on new content
+            updateCurrentFormatStyles(previousStateContent)
         }
     }
 
     private fun redo() {
         if (canRedo()) {
             currentHistoryIndex++
-            val nextState = contentHistory[currentHistoryIndex]
-            _state.update { it.copy(content = nextState) } // Directly update content
+            val nextStateContent = contentHistory[currentHistoryIndex]
+            _state.update { it.copy(content = nextStateContent) }
             updateUndoRedoState()
-            updateCurrentFormatStyles(nextState) // Update toolbar based on new content
+            updateCurrentFormatStyles(nextStateContent)
         }
     }
 
