@@ -1,266 +1,155 @@
 package com.example.notaflow.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Divider
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.* // Ensure this import is present and correct
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.wear.compose.material.ContentAlpha
 
-enum class TextStyle {
-    HEADING1, HEADING2, HEADING3, BOLD, ITALIC, UNDERLINE, STRIKETHROUGH,
-    BULLET_LIST, NUMBERED_LIST, QUOTE, CODE, LINK, NORMAL
+// Removed: import com.example.notaflow.ui.theme.NotaFlowTheme // Access theme via MaterialTheme
+
+enum class RichTextFormatAction {
+    BOLD, ITALIC, UNDERLINE, STRIKETHROUGH, LINK, COLOR, BLOCKQUOTE,
+    UNDO, REDO
 }
 
-/**
- * A simplified toolbar with formatting options for rich text editing
- */
 @Composable
 fun RichTextFormatToolbar(
-    onStyleSelected: (TextStyle) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val haptic = LocalHapticFeedback.current
-    val scrollState = rememberScrollState()
-
-    Surface(
-        tonalElevation = 3.dp,
-        modifier = modifier
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .horizontalScroll(scrollState)
-                .padding(4.dp)
-        ) {
-            // Headings
-            SimpleFormatButton(
-                text = "H1",
-                tooltip = "Heading 1",
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onStyleSelected(TextStyle.HEADING1)
-                }
-            )
-
-            SimpleFormatButton(
-                text = "H2",
-                tooltip = "Heading 2",
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onStyleSelected(TextStyle.HEADING2)
-                }
-            )
-
-            SimpleFormatButton(
-                text = "H3",
-                tooltip = "Heading 3",
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onStyleSelected(TextStyle.HEADING3)
-                }
-            )
-
-            VerticalDivider()
-
-            // Text styling
-            SimpleFormatButton(
-                text = "B",
-                isBold = true,
-                tooltip = "Bold",
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onStyleSelected(TextStyle.BOLD)
-                }
-            )
-
-            SimpleFormatButton(
-                text = "I",
-                isItalic = true,
-                tooltip = "Italic",
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onStyleSelected(TextStyle.ITALIC)
-                }
-            )
-
-            SimpleFormatButton(
-                text = "U",
-                isUnderlined = true,
-                tooltip = "Underline",
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onStyleSelected(TextStyle.UNDERLINE)
-                }
-            )
-
-            SimpleFormatButton(
-                text = "S",
-                isStrikethrough = true,
-                tooltip = "Strikethrough",
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onStyleSelected(TextStyle.STRIKETHROUGH)
-                }
-            )
-
-            VerticalDivider()
-
-            // Lists
-            SimpleFormatButton(
-                text = "•",
-                tooltip = "Bullet List",
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onStyleSelected(TextStyle.BULLET_LIST)
-                }
-            )
-
-            SimpleFormatButton(
-                text = "1.",
-                tooltip = "Numbered List",
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onStyleSelected(TextStyle.NUMBERED_LIST)
-                }
-            )
-
-            VerticalDivider()
-
-            // Other formats
-            SimpleFormatButton(
-                text = "\"",
-                tooltip = "Quote",
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onStyleSelected(TextStyle.QUOTE)
-                }
-            )
-
-            SimpleFormatButton(
-                text = "</>",
-                tooltip = "Code",
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onStyleSelected(TextStyle.CODE)
-                }
-            )
-
-            SimpleFormatButton(
-                text = "🔗",
-                tooltip = "Link",
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onStyleSelected(TextStyle.LINK)
-                }
-            )
-
-            VerticalDivider()
-
-            // Reset formatting
-            SimpleFormatButton(
-                text = "T",
-                tooltip = "Normal Text",
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onStyleSelected(TextStyle.NORMAL)
-                }
-            )
-        }
-    }
-}
-
-@Composable
-private fun SimpleFormatButton(
-    text: String,
-    tooltip: String,
-    onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    isBold: Boolean = false,
-    isItalic: Boolean = false,
-    isUnderlined: Boolean = false,
-    isStrikethrough: Boolean = false
+    currentStyles: Set<String>,
+    onStyleClick: (RichTextFormatAction) -> Unit,
+    onLinkClick: () -> Unit,
+    onColorClick: (Color) -> Unit,
+    selectedColor: Color,
+    canUndo: Boolean,
+    canRedo: Boolean
 ) {
-    var isHovered by remember { mutableStateOf(false) }
+    var showColorPicker by remember { mutableStateOf(false) }
 
-    Box(
-        contentAlignment = Alignment.Center,
+    Row(
         modifier = modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f)) // Corrected
+            .padding(vertical = 4.dp, horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceAround
     ) {
-        // The button
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .size(36.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(
-                    if (isHovered) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-                    else MaterialTheme.colorScheme.surface
-                )
-                .clickable {
-                    onClick()
-                    isHovered = false
-                }
-                .padding(4.dp)
-        ) {
-            Text(
-                text = text,
-                fontSize = 16.sp,
-                fontWeight = if (isBold) FontWeight.Bold else FontWeight.Normal,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-        }
+        ToolbarIconButton(
+            icon = Icons.Filled.Undo, // Standard Material Icon
+            contentDescription = "Undo",
+            onClick = { onStyleClick(RichTextFormatAction.UNDO) },
+            isSelected = false,
+            enabled = canUndo
+        )
+        ToolbarIconButton(
+            icon = Icons.Filled.Redo, // Standard Material Icon
+            contentDescription = "Redo",
+            onClick = { onStyleClick(RichTextFormatAction.REDO) },
+            isSelected = false,
+            enabled = canRedo
+        )
+        ToolbarIconButton(
+            icon = Icons.Filled.FormatBold, // Standard Material Icon
+            contentDescription = "Bold",
+            onClick = { onStyleClick(RichTextFormatAction.BOLD) },
+            isSelected = currentStyles.contains("BOLD")
+        )
+        ToolbarIconButton(
+            icon = Icons.Filled.FormatItalic, // Standard Material Icon
+            contentDescription = "Italic",
+            onClick = { onStyleClick(RichTextFormatAction.ITALIC) },
+            isSelected = currentStyles.contains("ITALIC")
+        )
+        ToolbarIconButton(
+            icon = Icons.Filled.FormatUnderlined, // Standard Material Icon
+            contentDescription = "Underline",
+            onClick = { onStyleClick(RichTextFormatAction.UNDERLINE) },
+            isSelected = currentStyles.contains("UNDERLINE")
+        )
+        ToolbarIconButton(
+            icon = Icons.Filled.FormatStrikethrough, // Standard Material Icon
+            contentDescription = "Strikethrough",
+            onClick = { onStyleClick(RichTextFormatAction.STRIKETHROUGH) },
+            isSelected = currentStyles.contains("STRIKETHROUGH")
+        )
+        ToolbarIconButton(
+            icon = Icons.Filled.Link, // Standard Material Icon
+            contentDescription = "Add Link",
+            onClick = { onLinkClick() },
+            isSelected = currentStyles.contains("LINK")
+        )
+        ToolbarIconButton(
+            icon = Icons.Filled.FormatQuote, // Standard Material Icon
+            contentDescription = "Blockquote",
+            onClick = { onStyleClick(RichTextFormatAction.BLOCKQUOTE) },
+            isSelected = currentStyles.contains("BLOCKQUOTE")
+        )
 
-        // Simple hover tooltip
-        if (isHovered) {
-            Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(top = 38.dp)
+        Box {
+            ToolbarIconButton(
+                icon = Icons.Filled.FormatColorText, // Standard Material Icon
+                contentDescription = "Text Color",
+                onClick = { showColorPicker = !showColorPicker },
+                isSelected = showColorPicker,
+                tint = if (selectedColor != Color.Unspecified && selectedColor != MaterialTheme.colorScheme.onSurface) selectedColor else LocalContentColor.current // Corrected
+            )
+            DropdownMenu(
+                expanded = showColorPicker,
+                onDismissRequest = { showColorPicker = false }
             ) {
-                Text(
-                    text = tooltip,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                val colors = listOf(
+                    MaterialTheme.colorScheme.onSurface, // Corrected
+                    Color.Red, Color.Blue, Color.Green, Color.Black, Color.DarkGray, Color.Magenta, Color.Yellow, Color.Cyan
                 )
+                colors.forEach { color ->
+                    DropdownMenuItem(
+                        text = {
+                            Box(modifier = Modifier.size(20.dp).background(color))
+                        },
+                        onClick = {
+                            onColorClick(color)
+                            showColorPicker = false
+                        }
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun VerticalDivider() {
-    Spacer(modifier = Modifier.width(2.dp))
-    Divider(
+private fun ToolbarIconButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    isSelected: Boolean,
+    enabled: Boolean = true,
+    // Corrected: Use MaterialTheme for primary color if selected
+    tint: Color = if (isSelected && enabled) MaterialTheme.colorScheme.primary
+    else LocalContentColor.current.copy(alpha = if (enabled) ContentAlpha.high else ContentAlpha.disabled) // Using ContentAlpha for standard disabled/enabled states
+) {
+    IconButton(
+        onClick = onClick,
+        enabled = enabled,
         modifier = Modifier
-            .padding(vertical = 4.dp)
-            .size(width = 1.dp, height = 24.dp)
-    )
-    Spacer(modifier = Modifier.width(2.dp))
+            .clip(RoundedCornerShape(8.dp))
+            // Corrected: Use MaterialTheme for background if selected
+            .background(if (isSelected && enabled) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = tint,
+            modifier = Modifier.size(20.dp)
+        )
+    }
 }

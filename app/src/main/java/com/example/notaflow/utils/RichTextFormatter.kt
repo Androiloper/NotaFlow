@@ -1,181 +1,181 @@
 package com.example.notaflow.utils
 
-/**
- * Utility class for handling rich text format conversions
- */
+import android.util.Log
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.ParagraphStyle
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextIndent
+import androidx.compose.ui.unit.sp
+
 object RichTextFormatter {
 
-    /**
-     * Enhances markdown text by standardizing formatting, fixing common issues,
-     * and ensuring consistent structure
-     */
-    fun enhanceMarkdown(text: String): String {
-        if (text.isBlank()) return ""
+    enum class StyleType {
+        BOLD, ITALIC, UNDERLINE, STRIKETHROUGH
+    }
 
-        // Split into lines for processing
-        val lines = text.lines()
-        val enhancedLines = mutableListOf<String>()
-        var inCodeBlock = false
-        var inListBlock = false
-        var lastLineWasHeader = false
+    enum class ParagraphStyleType {
+        BLOCKQUOTE // Add more like lists later
+    }
 
-        for (i in lines.indices) {
-            val line = lines[i].trimEnd() // Remove trailing whitespace
+    fun toggleStyle(textFieldValue: TextFieldValue, styleType: StyleType): TextFieldValue {
+        val selection = textFieldValue.selection
+        if (selection.collapsed && textFieldValue.composition == null) return textFieldValue
 
-            // Handle code blocks
-            if (line.startsWith("```")) {
-                inCodeBlock = !inCodeBlock
-                enhancedLines.add(line)
-                continue
+        val currentAnnotatedString = textFieldValue.annotatedString
+        val newAnnotatedString = buildAnnotatedString {
+            append(currentAnnotatedString)
+
+            val stylesInSelection = currentAnnotatedString.spanStyles.filter { range ->
+                maxOf(range.start, selection.min) < minOf(range.end, selection.max)
             }
 
-            // Don't process markdown within code blocks
-            if (inCodeBlock) {
-                enhancedLines.add(line)
-                continue
+            val styleAlreadyApplied = stylesInSelection.any { range ->
+                when (styleType) {
+                    StyleType.BOLD -> range.item.fontWeight == FontWeight.Bold
+                    StyleType.ITALIC -> range.item.fontStyle == FontStyle.Italic
+                    StyleType.UNDERLINE -> range.item.textDecoration?.contains(TextDecoration.Underline) == true
+                    StyleType.STRIKETHROUGH -> range.item.textDecoration?.contains(TextDecoration.LineThrough) == true
+                }
             }
 
-            // Process regular markdown
-            val enhancedLine = when {
-                // Standardize heading format (ensure space after #)
-                // Fixes the issue with headers not working by enforcing correct syntax
-                line.matches(Regex("^#+[^\\s].*$")) -> {
-                    val prefix = line.takeWhile { it == '#' }
-                    val content = line.substring(prefix.length).trimStart()
-                    "$prefix $content"
+            if (styleAlreadyApplied) {
+                val neutralizingStyle = when (styleType) {
+                    StyleType.BOLD -> SpanStyle(fontWeight = FontWeight.Normal)
+                    StyleType.ITALIC -> SpanStyle(fontStyle = FontStyle.Normal)
+                    StyleType.UNDERLINE -> {
+                        val combinedCurrentDecorations = stylesInSelection
+                            .mapNotNull { it.item.textDecoration }
+                            .reduceOrNull { acc, deco -> acc + deco }
+                        val resultingDecoration = combinedCurrentDecorations?.minus(TextDecoration.Underline)
+                        SpanStyle(textDecoration = if (resultingDecoration == TextDecoration.None || resultingDecoration?.mask == 0) null else resultingDecoration)
+                    }
+                    StyleType.STRIKETHROUGH -> {
+                        val combinedCurrentDecorations = stylesInSelection
+                            .mapNotNull { it.item.textDecoration }
+                            .reduceOrNull { acc, deco -> acc + deco }
+                        val resultingDecoration = combinedCurrentDecorations?.minus(TextDecoration.LineThrough)
+                        SpanStyle(textDecoration = if (resultingDecoration == TextDecoration.None || resultingDecoration?.mask == 0) null else resultingDecoration)
+                    }
                 }
-
-                // Fix headers without proper spacing between # symbols and text
-                line.matches(Regex("^#\\s+.*$")) -> line
-                line.matches(Regex("^##\\s+.*$")) -> line
-                line.matches(Regex("^###\\s+.*$")) -> line
-
-                // Headers with wrong spacing
-                line.matches(Regex("^#\\s{2,}.*$")) -> {
-                    "# " + line.substring(line.indexOf(line.trim().first { it != '#' && it != ' ' }))
-                }
-                line.matches(Regex("^##\\s{2,}.*$")) -> {
-                    "## " + line.substring(line.indexOf(line.trim().first { it != '#' && it != ' ' }))
-                }
-                line.matches(Regex("^###\\s{2,}.*$")) -> {
-                    "### " + line.substring(line.indexOf(line.trim().first { it != '#' && it != ' ' }))
-                }
-
-                // Ensure bullet lists have consistent spacing
-                line.matches(Regex("^\\s*[*+-]\\s.*$")) -> {
-                    val listMarkerIndex = line.indexOfFirst { it in listOf('*', '+', '-') }
-                    val prefix = line.substring(0, listMarkerIndex + 1)
-                    val content = line.substring(listMarkerIndex + 1).trimStart()
-                    "$prefix $content"
-                }
-
-                // Ensure numbered lists have consistent spacing
-                line.matches(Regex("^\\s*\\d+\\.\\s.*$")) -> {
-                    val dotIndex = line.indexOf('.')
-                    val prefix = line.substring(0, dotIndex + 1)
-                    val content = line.substring(dotIndex + 1).trimStart()
-                    "$prefix $content"
-                }
-
-                // Ensure blockquotes have consistent spacing
-                line.startsWith(">") -> {
-                    if (line.startsWith("> ")) line else line.replaceFirst(">", "> ")
-                }
-
-                // Other content
-                else -> line
-            }
-
-            // Add spacing between different blocks for better readability
-            val currentLineIsList = enhancedLine.trim().matches(Regex("^[*+-]\\s.*$|^\\d+\\.\\s.*$"))
-            val currentLineIsHeader = enhancedLine.trim().matches(Regex("^#+\\s.*$"))
-
-            if (lastLineWasHeader && !enhancedLine.isBlank() && !currentLineIsHeader) {
-                // No extra line needed after header
-                enhancedLines.add(enhancedLine)
-            } else if (inListBlock && !currentLineIsList && !enhancedLine.isBlank()) {
-                // Add space after list ends
-                if (enhancedLines.isNotEmpty() && enhancedLines.last().isNotBlank()) {
-                    enhancedLines.add("")
-                }
-                enhancedLines.add(enhancedLine)
+                addStyle(neutralizingStyle, selection.min, selection.max)
             } else {
-                enhancedLines.add(enhancedLine)
-            }
-
-            inListBlock = currentLineIsList
-            lastLineWasHeader = currentLineIsHeader
-        }
-
-        return enhancedLines.joinToString("\n")
-    }
-
-    /**
-     * Strips markdown formatting to get plain text
-     */
-    fun stripMarkdown(markdown: String): String {
-        if (markdown.isBlank()) return ""
-
-        var result = markdown
-
-        // Remove heading markers
-        result = result.replace(Regex("^\\s*#+\\s*", RegexOption.MULTILINE), "")
-
-        // Remove bold markers
-        result = result.replace(Regex("\\*\\*(.*?)\\*\\*"), "$1")
-
-        // Remove italic markers
-        result = result.replace(Regex("_(.*?)_"), "$1")
-        result = result.replace(Regex("\\*(.*?)\\*"), "$1")
-
-        // Remove strike-through
-        result = result.replace(Regex("~~(.*?)~~"), "$1")
-
-        // Remove code markers
-        result = result.replace(Regex("`(.*?)`"), "$1")
-
-        // Remove list markers
-        result = result.replace(Regex("^\\s*[*+-]\\s+", RegexOption.MULTILINE), "")
-        result = result.replace(Regex("^\\s*\\d+\\.\\s+", RegexOption.MULTILINE), "")
-
-        // Remove blockquotes
-        result = result.replace(Regex("^\\s*>\\s*", RegexOption.MULTILINE), "")
-
-        // Remove HTML tags (like underline)
-        result = result.replace(Regex("<.*?>"), "")
-
-        // Remove link syntax but keep text
-        result = result.replace(Regex("\\[(.*?)\\]\\(.*?\\)"), "$1")
-
-        return result
-    }
-
-    /**
-     * Determines if a text contains markdown formatting
-     */
-    fun containsMarkdown(text: String): Boolean {
-        if (text.isBlank()) return false
-
-        // Check for markdown formatting patterns
-        val markdownPatterns = listOf(
-            Regex("\\*\\*.*?\\*\\*"),  // Bold
-            Regex("_.*?_"),            // Italic
-            Regex("\\*[^*]+\\*"),      // Italic with asterisks
-            Regex("~~.*?~~"),          // Strikethrough
-            Regex("`.*?`"),            // Code
-            Regex("^\\s*#+\\s+.*$", RegexOption.MULTILINE),  // Headings
-            Regex("^\\s*[*+-]\\s+.*$", RegexOption.MULTILINE),  // Bullet lists
-            Regex("^\\s*\\d+\\.\\s+.*$", RegexOption.MULTILINE),  // Numbered lists
-            Regex("^\\s*>\\s+.*$", RegexOption.MULTILINE),  // Blockquotes
-            Regex("\\[.*?\\]\\(.*?\\)")  // Links
-        )
-
-        for (pattern in markdownPatterns) {
-            if (pattern.containsMatchIn(text)) {
-                return true
+                // Add the style
+                val styleToAdd = when (styleType) {
+                    StyleType.BOLD -> SpanStyle(fontWeight = FontWeight.Bold)
+                    StyleType.ITALIC -> SpanStyle(fontStyle = FontStyle.Italic)
+                    StyleType.UNDERLINE -> {
+                        val combinedCurrentDecorations = stylesInSelection
+                            .mapNotNull { it.item.textDecoration }
+                            .reduceOrNull { acc, deco -> acc + deco }
+                        val finalDecoration = combinedCurrentDecorations?.plus(TextDecoration.Underline) ?: TextDecoration.Underline
+                        SpanStyle(textDecoration = finalDecoration)
+                    }
+                    StyleType.STRIKETHROUGH -> {
+                        val combinedCurrentDecorations = stylesInSelection
+                            .mapNotNull { it.item.textDecoration }
+                            .reduceOrNull { acc, deco -> acc + deco }
+                        val finalDecoration = combinedCurrentDecorations?.plus(TextDecoration.LineThrough) ?: TextDecoration.LineThrough
+                        SpanStyle(textDecoration = finalDecoration)
+                    }
+                }
+                addStyle(styleToAdd, selection.min, selection.max)
             }
         }
+        return textFieldValue.copy(annotatedString = newAnnotatedString, selection = selection)
+    }
 
-        return false
+    fun formatColor(textFieldValue: TextFieldValue, color: Color): TextFieldValue {
+        val selection = textFieldValue.selection
+        if (selection.collapsed && textFieldValue.composition == null) return textFieldValue
+
+        val newAnnotatedString = buildAnnotatedString {
+            append(textFieldValue.annotatedString)
+            addStyle(SpanStyle(color = color), selection.min, selection.max)
+        }
+        return textFieldValue.copy(annotatedString = newAnnotatedString, selection = selection)
+    }
+
+    fun applyLink(textFieldValue: TextFieldValue, url: String, text: String, selection: TextRange): TextFieldValue {
+        val newAnnotatedString = buildAnnotatedString {
+            // It's important to qualify 'this' if there's any ambiguity,
+            // but usually it's inferred correctly in the buildAnnotatedString lambda.
+            val builder: AnnotatedString.Builder = this
+
+            builder.append(textFieldValue.annotatedString)
+            val start: Int
+            val end: Int
+            if (selection.collapsed) {
+                builder.insert(selection.start, text)
+                start = selection.start
+                end = selection.start + text.length
+            } else {
+                builder.replace(selection.min, selection.max, text)
+                start = selection.min
+                end = selection.min + text.length
+            }
+            builder.addStringAnnotation("URL", url, start, end)
+            builder.addStyle(SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline), start, end)
+        }
+        return textFieldValue.copy(annotatedString = newAnnotatedString, selection = TextRange(end))
+    }
+
+
+    fun toggleParagraphStyle(textFieldValue: TextFieldValue, styleType: ParagraphStyleType): TextFieldValue {
+        val selection = textFieldValue.selection
+        val currentAnnotatedString = textFieldValue.annotatedString
+
+        var paraStart = selection.min
+        while (paraStart > 0 && currentAnnotatedString.text[paraStart - 1] != '\n') {
+            paraStart--
+        }
+        var paraEnd = selection.max
+        while (paraEnd < currentAnnotatedString.text.length && currentAnnotatedString.text[paraEnd] != '\n') {
+            paraEnd++
+        }
+
+        val newAnnotatedString = buildAnnotatedString {
+            append(currentAnnotatedString)
+            val styleToToggle = when (styleType) {
+                ParagraphStyleType.BLOCKQUOTE -> ParagraphStyle(textIndent = TextIndent(16.sp, 16.sp))
+            }
+            val existingStyles = currentAnnotatedString.paragraphStyles.filter { range ->
+                maxOf(range.start, paraStart) < minOf(range.end, paraEnd)
+            }
+            val styleAlreadyApplied = existingStyles.any { range ->
+                range.item.textIndent == styleToToggle.textIndent
+            }
+
+            if (styleAlreadyApplied) {
+                addStyle(ParagraphStyle(), paraStart, paraEnd)
+            } else {
+                addStyle(styleToToggle, paraStart, paraEnd)
+            }
+        }
+        return textFieldValue.copy(annotatedString = newAnnotatedString, selection = TextRange(paraStart, paraEnd))
+    }
+
+    fun fixMarkdownErrors(markdownContent: String): String {
+        Log.d("RichTextFormatter", "Fixing markdown (stub): $markdownContent")
+        return markdownContent
+    }
+
+    fun stripMarkdown(markdownContent: String): String {
+        Log.d("RichTextFormatter", "Stripping markdown (stub): $markdownContent")
+        var text = markdownContent
+        text = text.replace(Regex("""\*\*(.*?)\*\*"""), "$1")
+        text = text.replace(Regex("""\*(.*?)\*"""), "$1")
+        text = text.replace(Regex("""__(.*?)__"""), "$1")
+        text = text.replace(Regex("""~~(.*?)~~"""), "$1")
+        text = text.replace(Regex("""^#+\s*(.*)""", RegexOption.MULTILINE), "$1")
+        text = text.replace(Regex("""\[(.*?)\]\(.*?\)"""), "$1")
+        text = text.replace(Regex("""\!\[(.*?)\]\(.*?\)"""), "$1")
+        return text
     }
 }
