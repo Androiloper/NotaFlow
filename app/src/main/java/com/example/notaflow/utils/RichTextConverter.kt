@@ -7,238 +7,338 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.ParagraphStyle
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.unit.sp
-import java.util.Stack // Keep if complex toHtml logic is re-enabled
 
 /**
- * Utility object for converting between AnnotatedString and HTML-like representation.
- * This version adds support for underline, strikethrough, and blockquotes.
+ * Simple utility object for converting between AnnotatedString and HTML.
+ * Avoids all BigInteger operations that cause compilation issues.
  */
 object RichTextConverter {
 
     private const val TAG = "RichTextConverter"
 
-    // Define HTML-like tags
-    private const val BOLD_TAG_OPEN = "<b>"
-    private const val BOLD_TAG_CLOSE = "</b>"
-    private const val ITALIC_TAG_OPEN = "<i>"
-    private const val ITALIC_TAG_CLOSE = "</i>"
-    private const val UNDERLINE_TAG_OPEN = "<u>"
-    private const val UNDERLINE_TAG_CLOSE = "</u>"
-    private const val STRIKETHROUGH_TAG_OPEN = "<s>"
-    private const val STRIKETHROUGH_TAG_CLOSE = "</s>"
-    private const val BLOCKQUOTE_TAG_OPEN = "<blockquote>"
-    private const val BLOCKQUOTE_TAG_CLOSE = "</blockquote>"
-    private fun fontColorTagOpen(colorHex: String) = "<font color=\"$colorHex\">"
-    private const val FONT_COLOR_TAG_CLOSE = "</font>"
-    private fun linkTagOpen(url: String) = "<a href=\"$url\">"
-    private const val LINK_TAG_CLOSE = "</a>"
-
-    // Regex for parsing
-    // Corrected: Use RegexOption.DOT_MATCHES_ALL
-    private val boldRegex = Regex("""<b>(.*?)</b>""", RegexOption.DOT_MATCHES_ALL)
-    private val italicRegex = Regex("""<i>(.*?)</i>""", RegexOption.DOT_MATCHES_ALL)
-    private val underlineRegex = Regex("""<u>(.*?)</u>""", RegexOption.DOT_MATCHES_ALL)
-    private val strikethroughRegex = Regex("""<s>(.*?)</s>""", RegexOption.DOT_MATCHES_ALL)
-    private val blockquoteRegex = Regex("""<blockquote>(.*?)</blockquote>""", RegexOption.DOT_MATCHES_ALL)
-    private val fontColorRegex = Regex("""<font color="(#[0-9a-fA-F]{6,8})">(.*?)</font>""", RegexOption.DOT_MATCHES_ALL) // Adjusted to capture #
-    private val linkRegex = Regex("""<a href="(.*?)">(.*?)</a>""", RegexOption.DOT_MATCHES_ALL)
-
-
     /**
-     * Converts an AnnotatedString to an HTML-like string.
-     */
-    fun toHtml(annotatedString: AnnotatedString): String {
-        val text = annotatedString.text
-        val spans = annotatedString.spanStyles
-        val paragraphs = annotatedString.paragraphStyles
-        val stringBuilder = StringBuilder()
-
-        val tagMap = mutableMapOf<Int, MutableList<String>>()
-
-        spans.forEach { range ->
-            val style = range.item
-            if (style.fontWeight == FontWeight.Bold) {
-                tagMap.getOrPut(range.start) { mutableListOf() }.add(BOLD_TAG_OPEN)
-                tagMap.getOrPut(range.end) { mutableListOf() }.add(BOLD_TAG_CLOSE)
-            }
-            if (style.fontStyle == FontStyle.Italic) {
-                tagMap.getOrPut(range.start) { mutableListOf() }.add(ITALIC_TAG_OPEN)
-                tagMap.getOrPut(range.end) { mutableListOf() }.add(ITALIC_TAG_CLOSE)
-            }
-            if (style.textDecoration?.contains(TextDecoration.Underline) == true) {
-                tagMap.getOrPut(range.start) { mutableListOf() }.add(UNDERLINE_TAG_OPEN)
-                tagMap.getOrPut(range.end) { mutableListOf() }.add(UNDERLINE_TAG_CLOSE)
-            }
-            if (style.textDecoration?.contains(TextDecoration.LineThrough) == true) {
-                tagMap.getOrPut(range.start) { mutableListOf() }.add(STRIKETHROUGH_TAG_OPEN)
-                tagMap.getOrPut(range.end) { mutableListOf() }.add(STRIKETHROUGH_TAG_CLOSE)
-            }
-            if (style.color != Color.Unspecified) {
-                // Convert Compose Color to hex string #RRGGBB
-                val red = (style.color.red * 255).toInt()
-                val green = (style.color.green * 255).toInt()
-                val blue = (style.color.blue * 255).toInt()
-                val colorHex = String.format("#%02X%02X%02X", red, green, blue)
-                tagMap.getOrPut(range.start) { mutableListOf() }.add(fontColorTagOpen(colorHex))
-                tagMap.getOrPut(range.end) { mutableListOf() }.add(FONT_COLOR_TAG_CLOSE)
-            }
-        }
-        annotatedString.getStringAnnotations("URL", 0, text.length).forEach { range ->
-            tagMap.getOrPut(range.start) { mutableListOf() }.add(linkTagOpen(range.item))
-            tagMap.getOrPut(range.end) { mutableListOf() }.add(LINK_TAG_CLOSE)
-        }
-        paragraphs.forEach { range ->
-            // Example for blockquote based on textIndent
-            if (range.item.textIndent == TextIndent(16.sp, 16.sp)) { // Ensure this matches how blockquotes are styled
-                tagMap.getOrPut(range.start) { mutableListOf() }.add(BLOCKQUOTE_TAG_OPEN)
-                tagMap.getOrPut(range.end) { mutableListOf() }.add(BLOCKQUOTE_TAG_CLOSE)
-            }
-        }
-
-        val sortedIndices = tagMap.keys.sorted()
-        var lastProcessedCharIndex = -1
-
-        for (i in text.indices) {
-            // Process tags for index i
-            tagMap[i]?.filter { it.startsWith("</") }?.reversed()?.forEach { stringBuilder.append(it) }
-            tagMap[i]?.filterNot { it.startsWith("</") }?.forEach { stringBuilder.append(it) }
-            stringBuilder.append(text[i])
-            lastProcessedCharIndex = i
-        }
-
-        // Append any tags that are at the very end of the string (after the last character)
-        tagMap[text.length]?.filter { it.startsWith("</") }?.reversed()?.forEach { stringBuilder.append(it) }
-        tagMap[text.length]?.filterNot { it.startsWith("</") }?.forEach { stringBuilder.append(it) }
-
-
-        // Log.d(TAG, "toHtml Output: ${stringBuilder.toString()}")
-        return stringBuilder.toString().replace("\n", "<br>")
-    }
-
-    /**
-     * Converts an HTML-like string to an AnnotatedString.
+     * Convert HTML to AnnotatedString with basic formatting support
      */
     fun fromHtml(html: String): AnnotatedString {
         if (html.isEmpty()) return AnnotatedString("")
-        // Log.d(TAG, "fromHtml Input: $html")
 
-        val textWithNewlines = html.replace("<br>", "\n", ignoreCase = true).replace("<br/>", "\n", ignoreCase = true)
+        return try {
+            // Clean up HTML
+            val cleanHtml = html
+                .replace("<br>", "\n", ignoreCase = true)
+                .replace("<br/>", "\n", ignoreCase = true)
+                .replace("<br />", "\n", ignoreCase = true)
 
-        val spanned: Spanned = Html.fromHtml(textWithNewlines, Html.FROM_HTML_MODE_LEGACY)
-
-        return buildAnnotatedString {
-            append(spanned.toString())
+            // Get plain text using Android's Html.fromHtml
+            val spanned: Spanned = Html.fromHtml(cleanHtml, Html.FROM_HTML_MODE_LEGACY)
             val plainText = spanned.toString()
 
-            boldRegex.findAll(textWithNewlines).forEach { matchResult ->
-                findAndApplyStyle(plainText, textWithNewlines, matchResult, SpanStyle(fontWeight = FontWeight.Bold))
-            }
-            italicRegex.findAll(textWithNewlines).forEach { matchResult ->
-                findAndApplyStyle(plainText, textWithNewlines, matchResult, SpanStyle(fontStyle = FontStyle.Italic))
-            }
-            underlineRegex.findAll(textWithNewlines).forEach { matchResult ->
-                findAndApplyStyle(plainText, textWithNewlines, matchResult, SpanStyle(textDecoration = TextDecoration.Underline))
-            }
-            strikethroughRegex.findAll(textWithNewlines).forEach { matchResult ->
-                findAndApplyStyle(plainText, textWithNewlines, matchResult, SpanStyle(textDecoration = TextDecoration.LineThrough))
-            }
-            fontColorRegex.findAll(textWithNewlines).forEach { matchResult ->
-                val (colorHexWithHash, _) = matchResult.destructured // content is groupValues[2]
-                try {
-                    val color = Color(android.graphics.Color.parseColor(colorHexWithHash)) // colorHexWithHash already has #
-                    findAndApplyStyle(plainText, textWithNewlines, matchResult, SpanStyle(color = color))
-                } catch (e: IllegalArgumentException) {
-                    Log.e(TAG, "Invalid color hex: $colorHexWithHash", e)
-                }
-            }
-            linkRegex.findAll(textWithNewlines).forEach { matchResult ->
-                val (url, linkTextHtml) = matchResult.destructured
-                val cleanLinkText = Html.fromHtml(linkTextHtml, Html.FROM_HTML_MODE_LEGACY).toString()
-                val foundIndices = findTextOccurrences(plainText, cleanLinkText) // Get all occurrences
+            buildAnnotatedString {
+                append(plainText)
 
-                // This is a heuristic: try to match based on original HTML position to disambiguate
-                // For simplicity, applying to all found occurrences if not easily disambiguated
-                foundIndices.forEach { index ->
-                    try {
-                        addStyle(SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline), index, index + cleanLinkText.length)
-                        addStringAnnotation("URL", url, index, index + cleanLinkText.length)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error applying link style for '$cleanLinkText': ${e.message}")
-                    }
+                // Apply bold formatting
+                applySimpleFormatting(this, cleanHtml, plainText, "<b>", "</b>") {
+                    SpanStyle(fontWeight = FontWeight.Bold)
                 }
-            }
-            blockquoteRegex.findAll(textWithNewlines).forEach { matchResult ->
-                val (contentHtml) = matchResult.destructured
-                val cleanContent = Html.fromHtml(contentHtml, Html.FROM_HTML_MODE_LEGACY).toString()
-                val foundIndices = findTextOccurrences(plainText, cleanContent)
-                foundIndices.forEach { index ->
-                    if ((index == 0 || plainText.getOrNull(index - 1) == '\n')) {
-                        try {
-                            // ParagraphStyle applies to [start, end), ensure end is at newline or end of text for proper paragraph
-                            var paraEnd = index + cleanContent.length
-                            if (paraEnd < plainText.length && plainText[paraEnd] == '\n') {
-                                paraEnd++ // Include the newline for the paragraph
-                            } else if (paraEnd == plainText.length) {
-                                // At the end of the text
-                            } else {
-                                // Content doesn't end with a newline, might not be a full paragraph
-                                // For simplicity, still apply if it's a block
-                            }
-                            addStyle(ParagraphStyle(textIndent = TextIndent(16.sp, 16.sp)), index, paraEnd)
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error applying blockquote style for '$cleanContent': ${e.message}")
-                        }
-                    }
+
+                // Apply italic formatting
+                applySimpleFormatting(this, cleanHtml, plainText, "<i>", "</i>") {
+                    SpanStyle(fontStyle = FontStyle.Italic)
                 }
+
+                // Apply underline formatting
+                applySimpleFormatting(this, cleanHtml, plainText, "<u>", "</u>") {
+                    SpanStyle(textDecoration = TextDecoration.Underline)
+                }
+
+                // Apply strikethrough formatting
+                applySimpleFormatting(this, cleanHtml, plainText, "<s>", "</s>") {
+                    SpanStyle(textDecoration = TextDecoration.LineThrough)
+                }
+
+                // Apply basic color formatting
+                applyColorFormatting(this, cleanHtml, plainText)
+
+                // Apply link formatting
+                applyLinkFormatting(this, cleanHtml, plainText)
+
+                // Apply blockquote formatting
+                applyBlockquoteFormatting(this, cleanHtml, plainText)
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error converting HTML to AnnotatedString", e)
+            AnnotatedString(Html.fromHtml(html, Html.FROM_HTML_MODE_LEGACY).toString())
         }
     }
 
-    // Helper to find all occurrences of a substring
-    private fun findTextOccurrences(text: String, sub: String): List<Int> {
-        if (sub.isEmpty()) return emptyList()
-        val indices = mutableListOf<Int>()
-        var startIndex = 0
-        while (startIndex < text.length) {
-            val index = text.indexOf(sub, startIndex)
-            if (index != -1) {
-                indices.add(index)
-                startIndex = index + sub.length
-            } else {
-                break
+    /**
+     * Convert AnnotatedString to HTML with basic formatting support
+     */
+    fun toHtml(annotatedString: AnnotatedString): String {
+        if (annotatedString.text.isEmpty()) return ""
+
+        return try {
+            val text = annotatedString.text
+            val result = StringBuilder()
+            var currentIndex = 0
+
+            // Simple approach: process character by character
+            while (currentIndex < text.length) {
+                val char = text[currentIndex]
+
+                // Get styles at current position
+                val styles = getStylesAtPosition(annotatedString, currentIndex)
+
+                // Apply opening tags based on styles
+                if (styles.bold) result.append("<b>")
+                if (styles.italic) result.append("<i>")
+                if (styles.underline) result.append("<u>")
+                if (styles.strikethrough) result.append("<s>")
+                if (styles.color != null) {
+                    result.append("<font color=\"${styles.color}\">")
+                }
+
+                // Add the character
+                when (char) {
+                    '\n' -> result.append("<br>")
+                    '<' -> result.append("&lt;")
+                    '>' -> result.append("&gt;")
+                    '&' -> result.append("&amp;")
+                    else -> result.append(char)
+                }
+
+                // Apply closing tags (in reverse order)
+                if (styles.color != null) result.append("</font>")
+                if (styles.strikethrough) result.append("</s>")
+                if (styles.underline) result.append("</u>")
+                if (styles.italic) result.append("</i>")
+                if (styles.bold) result.append("</b>")
+
+                currentIndex++
             }
+
+            result.toString()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error converting AnnotatedString to HTML", e)
+            annotatedString.text.replace("\n", "<br>")
         }
-        return indices
     }
 
-
-    private fun AnnotatedString.Builder.findAndApplyStyle(
+    /**
+     * Simple formatting application helper
+     */
+    private fun applySimpleFormatting(
+        builder: AnnotatedString.Builder,
+        html: String,
         plainText: String,
-        originalHtml: String,
-        htmlMatchResult: MatchResult,
-        styleToApply: SpanStyle
+        openTag: String,
+        closeTag: String,
+        styleProvider: () -> SpanStyle
     ) {
-        val htmlContent = htmlMatchResult.groupValues[1]
-        val plainContent = Html.fromHtml(htmlContent, Html.FROM_HTML_MODE_LEGACY).toString()
-        if (plainContent.isEmpty()) return
+        try {
+            val pattern = "$openTag(.*?)$closeTag".toRegex(RegexOption.DOT_MATCHES_ALL)
+            pattern.findAll(html).forEach { match ->
+                val content = match.groupValues[1]
+                val cleanContent = Html.fromHtml(content, Html.FROM_HTML_MODE_LEGACY).toString()
 
-        val foundIndices = findTextOccurrences(plainText, plainContent)
-        // Basic heuristic: if only one match in plainText, use it.
-        // Otherwise, this simple version might misapply styles if plainContent is common.
-        // A more advanced version would use the original HTML match position as a stronger hint.
-        foundIndices.forEach { index ->
-            try {
-                addStyle(styleToApply, index, index + plainContent.length)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error in findAndApplyStyle for '$plainContent': ${e.message} at index $index")
+                val index = plainText.indexOf(cleanContent)
+                if (index >= 0 && index + cleanContent.length <= plainText.length) {
+                    builder.addStyle(styleProvider(), index, index + cleanContent.length)
+                }
             }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error applying formatting for $openTag", e)
+        }
+    }
+
+    /**
+     * Apply color formatting - simplified to avoid BigInteger issues
+     */
+    private fun applyColorFormatting(
+        builder: AnnotatedString.Builder,
+        html: String,
+        plainText: String
+    ) {
+        try {
+            val colorPattern = "<font color=\"(#[0-9a-fA-F]{6})\">(.*?)</font>".toRegex(RegexOption.DOT_MATCHES_ALL)
+            colorPattern.findAll(html).forEach { match ->
+                val colorHex = match.groupValues[1]
+                val content = match.groupValues[2]
+                val cleanContent = Html.fromHtml(content, Html.FROM_HTML_MODE_LEGACY).toString()
+
+                try {
+                    val color = parseColorSafe(colorHex)
+                    val index = plainText.indexOf(cleanContent)
+                    if (index >= 0 && index + cleanContent.length <= plainText.length) {
+                        builder.addStyle(SpanStyle(color = color), index, index + cleanContent.length)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Invalid color: $colorHex", e)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error applying color formatting", e)
+        }
+    }
+
+    /**
+     * Apply link formatting
+     */
+    private fun applyLinkFormatting(
+        builder: AnnotatedString.Builder,
+        html: String,
+        plainText: String
+    ) {
+        try {
+            val linkPattern = "<a href=\"(.*?)\">(.*?)</a>".toRegex(RegexOption.DOT_MATCHES_ALL)
+            linkPattern.findAll(html).forEach { match ->
+                val url = match.groupValues[1]
+                val content = match.groupValues[2]
+                val cleanContent = Html.fromHtml(content, Html.FROM_HTML_MODE_LEGACY).toString()
+
+                val index = plainText.indexOf(cleanContent)
+                if (index >= 0 && index + cleanContent.length <= plainText.length) {
+                    builder.addStyle(
+                        SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline),
+                        index, index + cleanContent.length
+                    )
+                    builder.addStringAnnotation("URL", url, index, index + cleanContent.length)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error applying link formatting", e)
+        }
+    }
+
+    /**
+     * Apply blockquote formatting
+     */
+    private fun applyBlockquoteFormatting(
+        builder: AnnotatedString.Builder,
+        html: String,
+        plainText: String
+    ) {
+        try {
+            val blockquotePattern = "<blockquote>(.*?)</blockquote>".toRegex(RegexOption.DOT_MATCHES_ALL)
+            blockquotePattern.findAll(html).forEach { match ->
+                val content = match.groupValues[1]
+                val cleanContent = Html.fromHtml(content, Html.FROM_HTML_MODE_LEGACY).toString()
+
+                val index = plainText.indexOf(cleanContent)
+                if (index >= 0) {
+                    var endIndex = index + cleanContent.length
+                    if (endIndex < plainText.length && plainText[endIndex] == '\n') {
+                        endIndex++
+                    }
+                    if (endIndex <= plainText.length) {
+                        builder.addStyle(
+                            ParagraphStyle(textIndent = TextIndent(16.sp, 16.sp)),
+                            index, endIndex
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error applying blockquote formatting", e)
+        }
+    }
+
+    /**
+     * Get styles at a specific position - simplified
+     */
+    private fun getStylesAtPosition(annotatedString: AnnotatedString, position: Int): SimpleStyle {
+        val styles = SimpleStyle()
+
+        try {
+            annotatedString.spanStyles.forEach { spanStyle ->
+                if (position >= spanStyle.start && position < spanStyle.end) {
+                    val style = spanStyle.item
+                    if (style.fontWeight == FontWeight.Bold) styles.bold = true
+                    if (style.fontStyle == FontStyle.Italic) styles.italic = true
+                    if (style.textDecoration?.contains(TextDecoration.Underline) == true) styles.underline = true
+                    if (style.textDecoration?.contains(TextDecoration.LineThrough) == true) styles.strikethrough = true
+                    if (style.color != Color.Unspecified) {
+                        styles.color = colorToHexSafe(style.color)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error getting styles at position", e)
+        }
+
+        return styles
+    }
+
+    /**
+     * Safe color parsing that avoids BigInteger operations
+     */
+    private fun parseColorSafe(colorHex: String): Color {
+        return try {
+            // Use Android's color parsing
+            val colorInt = android.graphics.Color.parseColor(colorHex)
+            Color(colorInt)
+        } catch (e: Exception) {
+            Color.Black // Fallback
+        }
+    }
+
+    /**
+     * Safe color to hex conversion that avoids BigInteger operations
+     */
+    private fun colorToHexSafe(color: Color): String {
+        return try {
+            val red = (color.red * 255f).toInt().coerceIn(0, 255)
+            val green = (color.green * 255f).toInt().coerceIn(0, 255)
+            val blue = (color.blue * 255f).toInt().coerceIn(0, 255)
+
+            // Build hex string manually to avoid any BigInteger operations
+            val redHex = red.toString(16).padStart(2, '0')
+            val greenHex = green.toString(16).padStart(2, '0')
+            val blueHex = blue.toString(16).padStart(2, '0')
+
+            "#$redHex$greenHex$blueHex"
+        } catch (e: Exception) {
+            "#000000" // Fallback
+        }
+    }
+
+    /**
+     * Simple style holder to avoid complex operations
+     */
+    private data class SimpleStyle(
+        var bold: Boolean = false,
+        var italic: Boolean = false,
+        var underline: Boolean = false,
+        var strikethrough: Boolean = false,
+        var color: String? = null
+    )
+
+    /**
+     * Extract plain text from HTML
+     */
+    fun htmlToPlainText(html: String): String {
+        return try {
+            Html.fromHtml(html, Html.FROM_HTML_MODE_LEGACY).toString()
+        } catch (e: Exception) {
+            html
+        }
+    }
+
+    /**
+     * Check if HTML contains any formatting
+     */
+    fun hasFormatting(html: String): Boolean {
+        return try {
+            val cleanHtml = html.replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "")
+            cleanHtml.contains(Regex("<[^>]+>"))
+        } catch (e: Exception) {
+            false
         }
     }
 }

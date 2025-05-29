@@ -36,12 +36,18 @@ class NoteEditViewModel @Inject constructor(
     private val _state = MutableStateFlow(NoteEditState())
     val state: StateFlow<NoteEditState> = _state.asStateFlow()
 
-    // Ensure the key "noteId" matches what you use in your Navigation graph
     private val noteIdFromNav: Long? = savedStateHandle.get<Long>("noteId")?.takeIf { it != -1L && it != 0L }
 
+    // Enhanced history management for undo/redo
     private val contentHistory = mutableListOf<TextFieldValue>()
     private var currentHistoryIndex = -1
-    private val maxHistorySize = 50
+    private val maxHistorySize = 100
+    private var isUpdatingFromHistory = false
+
+    // Track pending formatting for cursor position - this is key to fixing the disappearing formatting
+    private var pendingCursorStyles = mutableSetOf<String>()
+    private var pendingCursorColor: Color? = null
+    private var lastKnownCursorPosition = 0
 
     init {
         if (noteIdFromNav != null) {
@@ -54,7 +60,6 @@ class NoteEditViewModel @Inject constructor(
                 it.copy(
                     content = initialContent,
                     isNewNote = true
-                    // noteColorHex is already initialized in NoteEditState
                 )
             }
         }
@@ -73,7 +78,6 @@ class NoteEditViewModel @Inject constructor(
                         selection = TextRange(annotatedString.text.length)
                     )
 
-                    // Convert color index to hex string
                     val colorHex = Note.getColorHexByIndex(note.color)
 
                     _state.update {
@@ -90,6 +94,7 @@ class NoteEditViewModel @Inject constructor(
                     }
                     contentHistory.clear()
                     addToHistory(contentFieldValue)
+                    updateCurrentFormatStyles(contentFieldValue)
                 } else {
                     _state.update { it.copy(error = "Note not found", isLoading = false) }
                 }
@@ -104,15 +109,117 @@ class NoteEditViewModel @Inject constructor(
         _state.update { it.copy(title = newTitle) }
     }
 
+    /**
+     * Enhanced content change handling - KEY FIX for disappearing formatting
+     */
     fun onContentChange(newContent: TextFieldValue) {
-        _state.update { it.copy(content = newContent) }
-        if (contentHistory.getOrNull(currentHistoryIndex) != newContent) {
-            addToHistory(newContent)
+        if (isUpdatingFromHistory) return
+
+        val currentContent = _state.value.content
+        lastKnownCursorPosition = newContent.selection.start
+
+        // Check if we should apply pending styles to newly typed content
+        val processedContent = if (shouldApplyPendingStyles(currentContent, newContent)) {
+            applyPendingStylesToNewContent(currentContent, newContent)
+        } else {
+            newContent
         }
-        updateCurrentFormatStyles(newContent)
+
+        _state.update { it.copy(content = processedContent) }
+
+        // Add to history only for significant changes (not just cursor movements)
+        if (isSignificantChange(currentContent, processedContent)) {
+            addToHistory(processedContent)
+        }
+
+        updateCurrentFormatStyles(processedContent)
+
+        // Clear pending styles if they were applied
+        if (processedContent != newContent) {
+            clearPendingStylesIfApplied(currentContent, processedContent)
+        }
+
+        Log.d("NoteEditViewModel", "Content changed. Pending styles: $pendingCursorStyles")
     }
 
-    // This is for cases where an external component might feed raw HTML/Markdown
+    /**
+     * Check if we should apply pending cursor styles to new content
+     */
+    private fun shouldApplyPendingStyles(oldContent: TextFieldValue, newContent: TextFieldValue): Boolean {
+        val hasNewText = newContent.text.length > oldContent.text.length
+        val hasPendingStyles = pendingCursorStyles.isNotEmpty() || pendingCursorColor != null
+        val atCursor = newContent.selection.collapsed
+
+        return hasNewText && hasPendingStyles && atCursor
+    }
+
+    /**
+     * Apply pending styles to newly typed text - CORE FIX
+     */
+    private fun applyPendingStylesToNewContent(oldContent: TextFieldValue, newContent: TextFieldValue): TextFieldValue {
+        if (pendingCursorStyles.isEmpty() && pendingCursorColor == null) {
+            return newContent
+        }
+
+        val insertionStart = oldContent.selection.start
+        val insertionEnd = newContent.selection.start
+
+        if (insertionStart >= insertionEnd) return newContent
+
+        var processedContent = newContent
+        Log.d("NoteEditViewModel", "Applying pending styles from $insertionStart to $insertionEnd")
+
+        // Apply each pending style
+        pendingCursorStyles.forEach { styleString ->
+            val styleType = when (styleString) {
+                "BOLD" -> RichTextFormatter.StyleType.BOLD
+                "ITALIC" -> RichTextFormatter.StyleType.ITALIC
+                "UNDERLINE" -> RichTextFormatter.StyleType.UNDERLINE
+                "STRIKETHROUGH" -> RichTextFormatter.StyleType.STRIKETHROUGH
+                else -> return@forEach
+            }
+
+            // Create temporary selection for the new text
+            val tempSelection = TextRange(insertionStart, insertionEnd)
+            val tempContent = processedContent.copy(selection = tempSelection)
+            processedContent = RichTextFormatter.toggleStyle(tempContent, styleType)
+                .copy(selection = newContent.selection) // Restore original cursor position
+        }
+
+        // Apply pending color
+        pendingCursorColor?.let { color ->
+            val tempSelection = TextRange(insertionStart, insertionEnd)
+            val tempContent = processedContent.copy(selection = tempSelection)
+            processedContent = RichTextFormatter.formatColor(tempContent, color)
+                .copy(selection = newContent.selection)
+        }
+
+        return processedContent
+    }
+
+    /**
+     * Clear pending styles after they've been applied
+     */
+    private fun clearPendingStylesIfApplied(oldContent: TextFieldValue, newContent: TextFieldValue) {
+        if (newContent.text.length > oldContent.text.length) {
+            // Text was added, so pending styles were likely applied
+            Log.d("NoteEditViewModel", "Clearing pending styles after application")
+            // Don't clear immediately - keep for next character
+            // This allows continuous formatting
+        }
+    }
+
+    /**
+     * Determine if a content change is significant enough for history
+     */
+    private fun isSignificantChange(oldContent: TextFieldValue, newContent: TextFieldValue): Boolean {
+        val textChanged = oldContent.text != newContent.text
+        val formattingChanged = oldContent.annotatedString != newContent.annotatedString
+        val lengthDifference = Math.abs(oldContent.text.length - newContent.text.length)
+
+        return textChanged || formattingChanged || lengthDifference > 1
+    }
+
     fun onRichTextContentChangeViaRaw(rawContent: String) {
         val currentContentTfv = _state.value.content
         val newAnnotatedString = RichTextConverter.fromHtml(rawContent)
@@ -125,7 +232,7 @@ class NoteEditViewModel @Inject constructor(
                 annotatedString = newAnnotatedString,
                 selection = TextRange(newAnnotatedString.length)
             )
-            onContentChange(newContentTfvUpdated) // Use the main onContentChange
+            onContentChange(newContentTfvUpdated)
         }
     }
 
@@ -142,8 +249,11 @@ class NoteEditViewModel @Inject constructor(
             contentHistory.clear()
             addToHistory(newContent)
             updateCurrentFormatStyles(newContent)
+            // Clear pending styles when switching to plain text
+            pendingCursorStyles.clear()
+            pendingCursorColor = null
         } else {
-            addToHistory(_state.value.content) // Re-add to history if switching back to rich
+            addToHistory(_state.value.content)
         }
     }
 
@@ -160,7 +270,6 @@ class NoteEditViewModel @Inject constructor(
 
             _state.update { it.copy(isLoading = true) }
 
-            // Convert hex color to index in the noteColors list
             val colorObject = try {
                 Color(android.graphics.Color.parseColor(currentState.noteColorHex))
             } catch (e: Exception) {
@@ -176,8 +285,8 @@ class NoteEditViewModel @Inject constructor(
                 color = colorIndex,
                 isPinned = currentState.isPinned,
                 isBookmarked = currentState.isBookmarked,
-                isDeleted = currentState.note.isDeleted, // Preserve existing delete state
-                deletedTimestamp = currentState.note.deletedTimestamp // Preserve existing delete timestamp
+                isDeleted = currentState.note.isDeleted,
+                deletedTimestamp = currentState.note.deletedTimestamp
             ) ?: Note(
                 title = title,
                 content = contentHtml,
@@ -186,7 +295,7 @@ class NoteEditViewModel @Inject constructor(
                 color = colorIndex,
                 isPinned = currentState.isPinned,
                 isBookmarked = currentState.isBookmarked,
-                isDeleted = false, // New notes are not deleted
+                isDeleted = false,
                 deletedTimestamp = null
             )
 
@@ -204,44 +313,104 @@ class NoteEditViewModel @Inject constructor(
         _state.update { it.copy(error = null) }
     }
 
+    /**
+     * Enhanced format style detection - CRITICAL for maintaining formatting state
+     */
     private fun updateCurrentFormatStyles(contentValue: TextFieldValue) {
         val selection = contentValue.selection
         val currentStyles = mutableSetOf<String>()
         val annotatedString = contentValue.annotatedString
 
-        val activeRange = if (selection.collapsed) {
-            val start = selection.start.coerceAtMost(annotatedString.text.length)
-            val end = (start + 1).coerceAtMost(annotatedString.text.length)
-            TextRange(start, end)
-        } else {
-            selection
+        if (annotatedString.text.isEmpty()) {
+            // Use pending styles for empty content
+            currentStyles.addAll(pendingCursorStyles)
+            val color = pendingCursorColor ?: Color.Unspecified
+            _state.update {
+                it.copy(
+                    currentFormatStyles = currentStyles,
+                    currentSelectedTextColor = color
+                )
+            }
+            return
         }
 
-        annotatedString.spanStyles.filter {
-            it.start < activeRange.end && it.end > activeRange.start
-        }.forEach {
-            if (it.item.fontWeight == FontWeight.Bold) currentStyles.add("BOLD")
-            if (it.item.fontStyle == FontStyle.Italic) currentStyles.add("ITALIC")
-            it.item.textDecoration?.let { deco ->
-                if (deco.contains(TextDecoration.Underline)) currentStyles.add("UNDERLINE")
-                if (deco.contains(TextDecoration.LineThrough)) currentStyles.add("STRIKETHROUGH")
+        val activeRange = when {
+            selection.collapsed -> {
+                // For cursor position, check styles at or before cursor
+                val pos = selection.start.coerceAtMost(annotatedString.text.length)
+                if (pos > 0) {
+                    // Check the character before cursor to inherit styles
+                    TextRange(pos - 1, pos)
+                } else {
+                    TextRange(pos, (pos + 1).coerceAtMost(annotatedString.text.length))
+                }
+            }
+            else -> selection
+        }
+
+        var activeColor = Color.Unspecified
+
+        // Analyze span styles in the active range
+        annotatedString.spanStyles.filter { spanStyle ->
+            spanStyle.start < activeRange.end && spanStyle.end > activeRange.start
+        }.forEach { spanStyle ->
+            val item = spanStyle.item
+
+            // Check each formatting type
+            if (item.fontWeight == FontWeight.Bold) {
+                currentStyles.add("BOLD")
+            }
+            if (item.fontStyle == FontStyle.Italic) {
+                currentStyles.add("ITALIC")
+            }
+
+            item.textDecoration?.let { decoration ->
+                if (decoration.contains(TextDecoration.Underline)) {
+                    currentStyles.add("UNDERLINE")
+                }
+                if (decoration.contains(TextDecoration.LineThrough)) {
+                    currentStyles.add("STRIKETHROUGH")
+                }
+            }
+
+            // Track the most recent color
+            if (item.color != Color.Unspecified) {
+                activeColor = item.color
             }
         }
 
-        // Process URL annotations separately
+        // Check for URL annotations (links)
         val urlAnnotations = annotatedString.getStringAnnotations("URL", activeRange.start, activeRange.end)
         if (urlAnnotations.isNotEmpty()) {
             currentStyles.add("LINK")
         }
 
-        // Process paragraph styles
-        annotatedString.paragraphStyles.filter {
-            it.start < activeRange.end && it.end > activeRange.start
-        }.forEach {
-            if (it.item.textIndent == TextIndent(16.sp, 16.sp)) currentStyles.add("BLOCKQUOTE")
+        // Check paragraph styles for blockquotes
+        annotatedString.paragraphStyles.filter { paraStyle ->
+            paraStyle.start < activeRange.end && paraStyle.end > activeRange.start
+        }.forEach { paraStyle ->
+            if (paraStyle.item.textIndent == TextIndent(16.sp, 16.sp)) {
+                currentStyles.add("BLOCKQUOTE")
+            }
         }
 
-        _state.update { it.copy(currentFormatStyles = currentStyles) }
+        // Update pending styles for cursor - CRITICAL for next character formatting
+        if (selection.collapsed) {
+            pendingCursorStyles.clear()
+            pendingCursorStyles.addAll(currentStyles)
+            if (activeColor != Color.Unspecified) {
+                pendingCursorColor = activeColor
+            }
+
+            Log.d("NoteEditViewModel", "Updated pending styles at cursor: $pendingCursorStyles")
+        }
+
+        _state.update {
+            it.copy(
+                currentFormatStyles = currentStyles,
+                currentSelectedTextColor = activeColor
+            )
+        }
     }
 
     fun handleFormatAction(action: RichTextFormatAction) {
@@ -255,30 +424,35 @@ class NoteEditViewModel @Inject constructor(
                 _state.update { it.copy(showLinkDialog = true) }
             }
             RichTextFormatAction.COLOR -> {
-                // This is handled by setting the color via setTextColor method
-                // Do nothing here as the actual color will be passed separately
+                // Color handling is done via setTextColor method
             }
             RichTextFormatAction.UNDO -> undo()
             RichTextFormatAction.REDO -> redo()
+            RichTextFormatAction.HEADER1 -> TODO()
+            RichTextFormatAction.HEADER2 -> TODO()
+            RichTextFormatAction.LIST_BULLET -> TODO()
+            RichTextFormatAction.LIST_NUMBERED -> TODO()
         }
     }
 
-    // New method to set text color
+    /**
+     * Enhanced text color setting with cursor support
+     */
     fun setTextColor(color: Color) {
-        // Implementation depends on your text editor's capabilities
         val currentContent = _state.value.content
         val selection = currentContent.selection
 
-        if (selection.collapsed && currentContent.composition == null) {
-            // Just update the color for future typing
+        if (selection.collapsed) {
+            // Set color for future typing at cursor
+            pendingCursorColor = color
             _state.update { it.copy(currentSelectedTextColor = color) }
-            return
+            Log.d("NoteEditViewModel", "Set pending cursor color: $color")
+        } else {
+            // Apply color to selected text immediately
+            val newTextFieldValue = RichTextFormatter.formatColor(currentContent, color)
+            onContentChange(newTextFieldValue)
+            _state.update { it.copy(currentSelectedTextColor = color) }
         }
-
-        // Apply color to selected text
-        val newTextFieldValue = RichTextFormatter.formatColor(currentContent, color)
-        onContentChange(newTextFieldValue)
-        _state.update { it.copy(currentSelectedTextColor = color) }
     }
 
     fun applyLink(url: String, text: String) {
@@ -302,9 +476,37 @@ class NoteEditViewModel @Inject constructor(
         _state.update { it.copy(currentLinkUrl = url) }
     }
 
+    /**
+     * Enhanced style toggling with cursor position support
+     */
     private fun toggleStyle(styleType: RichTextFormatter.StyleType) {
-        val newContent = RichTextFormatter.toggleStyle(_state.value.content, styleType)
-        onContentChange(newContent)
+        val currentContent = _state.value.content
+        val selection = currentContent.selection
+
+        if (selection.collapsed) {
+            // Handle cursor position formatting - update pending styles
+            val styleKey = when (styleType) {
+                RichTextFormatter.StyleType.BOLD -> "BOLD"
+                RichTextFormatter.StyleType.ITALIC -> "ITALIC"
+                RichTextFormatter.StyleType.UNDERLINE -> "UNDERLINE"
+                RichTextFormatter.StyleType.STRIKETHROUGH -> "STRIKETHROUGH"
+            }
+
+            if (pendingCursorStyles.contains(styleKey)) {
+                pendingCursorStyles.remove(styleKey)
+                Log.d("NoteEditViewModel", "Removed $styleKey from pending styles")
+            } else {
+                pendingCursorStyles.add(styleKey)
+                Log.d("NoteEditViewModel", "Added $styleKey to pending styles")
+            }
+
+            // Update the UI to reflect the pending change
+            updateCurrentFormatStyles(currentContent)
+        } else {
+            // Apply formatting to selected text immediately
+            val newContent = RichTextFormatter.toggleStyle(currentContent, styleType)
+            onContentChange(newContent)
+        }
     }
 
     private fun toggleParagraphStyle(styleType: RichTextFormatter.ParagraphStyleType) {
@@ -312,35 +514,56 @@ class NoteEditViewModel @Inject constructor(
         onContentChange(newContent)
     }
 
+    /**
+     * Enhanced history management
+     */
     private fun addToHistory(value: TextFieldValue) {
+        if (isUpdatingFromHistory) return
+
+        // Don't add if it's identical to current history item
+        if (contentHistory.getOrNull(currentHistoryIndex)?.annotatedString == value.annotatedString) {
+            return
+        }
+
+        // Remove future history if we're not at the end
         if (currentHistoryIndex < contentHistory.size - 1) {
             contentHistory.subList(currentHistoryIndex + 1, contentHistory.size).clear()
         }
+
         contentHistory.add(value)
+
+        // Maintain history size limit
         if (contentHistory.size > maxHistorySize) {
             contentHistory.removeAt(0)
         }
+
         currentHistoryIndex = contentHistory.size - 1
         updateUndoRedoState()
     }
 
     private fun undo() {
         if (canUndo()) {
+            isUpdatingFromHistory = true
             currentHistoryIndex--
-            val previousStateContent = contentHistory[currentHistoryIndex]
-            _state.update { it.copy(content = previousStateContent) }
+            val previousContent = contentHistory[currentHistoryIndex]
+            _state.update { it.copy(content = previousContent) }
+            updateCurrentFormatStyles(previousContent)
             updateUndoRedoState()
-            updateCurrentFormatStyles(previousStateContent)
+            isUpdatingFromHistory = false
+            Log.d("NoteEditViewModel", "Undo performed")
         }
     }
 
     private fun redo() {
         if (canRedo()) {
+            isUpdatingFromHistory = true
             currentHistoryIndex++
-            val nextStateContent = contentHistory[currentHistoryIndex]
-            _state.update { it.copy(content = nextStateContent) }
+            val nextContent = contentHistory[currentHistoryIndex]
+            _state.update { it.copy(content = nextContent) }
+            updateCurrentFormatStyles(nextContent)
             updateUndoRedoState()
-            updateCurrentFormatStyles(nextStateContent)
+            isUpdatingFromHistory = false
+            Log.d("NoteEditViewModel", "Redo performed")
         }
     }
 

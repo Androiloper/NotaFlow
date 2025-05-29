@@ -24,155 +24,254 @@ object RichTextFormatter {
         BLOCKQUOTE
     }
 
+    /**
+     * Improved style toggling that preserves existing formatting better
+     */
     fun toggleStyle(textFieldValue: TextFieldValue, styleType: StyleType): TextFieldValue {
         val selection = textFieldValue.selection
-        if (selection.collapsed && textFieldValue.composition == null) return textFieldValue
+        val annotatedString = textFieldValue.annotatedString
+        val text = annotatedString.text
 
-        val currentAnnotatedString = textFieldValue.annotatedString
-        val newAnnotatedString = buildAnnotatedString {
-            append(currentAnnotatedString)
-
-            val stylesInSelection = currentAnnotatedString.spanStyles.filter { range ->
-                maxOf(range.start, selection.min) < minOf(range.end, selection.max)
-            }
-
-            var isCurrentlyApplied = false
-            when (styleType) {
-                StyleType.BOLD -> isCurrentlyApplied = stylesInSelection.any { it.item.fontWeight == FontWeight.Bold }
-                StyleType.ITALIC -> isCurrentlyApplied = stylesInSelection.any { it.item.fontStyle == FontStyle.Italic }
-                StyleType.UNDERLINE -> isCurrentlyApplied = stylesInSelection.any {
-                    val decoration = it.item.textDecoration
-                    decoration != null && decoration != TextDecoration.None &&
-                            (decoration == TextDecoration.Underline ||
-                                    (decoration.contains(TextDecoration.Underline) && decoration.contains(TextDecoration.LineThrough)))
-                }
-                StyleType.STRIKETHROUGH -> isCurrentlyApplied = stylesInSelection.any {
-                    val decoration = it.item.textDecoration
-                    decoration != null && decoration != TextDecoration.None &&
-                            (decoration == TextDecoration.LineThrough ||
-                                    (decoration.contains(TextDecoration.Underline) && decoration.contains(TextDecoration.LineThrough)))
-                }
-            }
-
-            val targetStyle: SpanStyle = when (styleType) {
-                StyleType.BOLD -> if (isCurrentlyApplied) SpanStyle(fontWeight = FontWeight.Normal) else SpanStyle(fontWeight = FontWeight.Bold)
-                StyleType.ITALIC -> if (isCurrentlyApplied) SpanStyle(fontStyle = FontStyle.Normal) else SpanStyle(fontStyle = FontStyle.Italic)
-                StyleType.UNDERLINE -> {
-                    if (isCurrentlyApplied) {
-                        // Remove underline from the existing decoration
-                        val currentDecoration = stylesInSelection
-                            .mapNotNull { it.item.textDecoration }
-                            .firstOrNull()
-
-                        if (currentDecoration != null) {
-                            // If we have LineThrough + Underline, keep only LineThrough
-                            if (currentDecoration == TextDecoration.combine(listOf(TextDecoration.Underline, TextDecoration.LineThrough))) {
-                                SpanStyle(textDecoration = TextDecoration.LineThrough)
-                            } else {
-                                // If we only have Underline, remove it
-                                SpanStyle(textDecoration = TextDecoration.None)
-                            }
-                        } else {
-                            // No decoration to remove
-                            SpanStyle(textDecoration = TextDecoration.None)
-                        }
-                    } else {
-                        // Add underline to existing decoration
-                        val currentDecoration = stylesInSelection
-                            .mapNotNull { it.item.textDecoration }
-                            .firstOrNull()
-
-                        if (currentDecoration != null && currentDecoration != TextDecoration.None) {
-                            // If we already have LineThrough, add Underline to it
-                            if (currentDecoration == TextDecoration.LineThrough) {
-                                SpanStyle(textDecoration = TextDecoration.combine(listOf(TextDecoration.Underline, TextDecoration.LineThrough)))
-                            } else {
-                                // Otherwise just add Underline
-                                SpanStyle(textDecoration = TextDecoration.Underline)
-                            }
-                        } else {
-                            // No existing decoration, just apply underline
-                            SpanStyle(textDecoration = TextDecoration.Underline)
-                        }
-                    }
-                }
-                StyleType.STRIKETHROUGH -> {
-                    if (isCurrentlyApplied) {
-                        // Remove strikethrough from the existing decoration
-                        val currentDecoration = stylesInSelection
-                            .mapNotNull { it.item.textDecoration }
-                            .firstOrNull()
-
-                        if (currentDecoration != null) {
-                            // If we have LineThrough + Underline, keep only Underline
-                            if (currentDecoration == TextDecoration.combine(listOf(TextDecoration.Underline, TextDecoration.LineThrough))) {
-                                SpanStyle(textDecoration = TextDecoration.Underline)
-                            } else {
-                                // If we only have LineThrough, remove it
-                                SpanStyle(textDecoration = TextDecoration.None)
-                            }
-                        } else {
-                            // No decoration to remove
-                            SpanStyle(textDecoration = TextDecoration.None)
-                        }
-                    } else {
-                        // Add strikethrough to existing decoration
-                        val currentDecoration = stylesInSelection
-                            .mapNotNull { it.item.textDecoration }
-                            .firstOrNull()
-
-                        if (currentDecoration != null && currentDecoration != TextDecoration.None) {
-                            // If we already have Underline, add LineThrough to it
-                            if (currentDecoration == TextDecoration.Underline) {
-                                SpanStyle(textDecoration = TextDecoration.combine(listOf(TextDecoration.Underline, TextDecoration.LineThrough)))
-                            } else {
-                                // Otherwise just add LineThrough
-                                SpanStyle(textDecoration = TextDecoration.LineThrough)
-                            }
-                        } else {
-                            // No existing decoration, just apply strikethrough
-                            SpanStyle(textDecoration = TextDecoration.LineThrough)
-                        }
-                    }
-                }
-            }
-            addStyle(targetStyle, selection.min, selection.max)
+        // Handle empty selection - apply to cursor position for future typing
+        if (selection.collapsed) {
+            return handleCursorPositionFormatting(textFieldValue, styleType)
         }
-        return textFieldValue.copy(annotatedString = newAnnotatedString, selection = selection)
+
+        val selectionStart = selection.min
+        val selectionEnd = selection.max
+
+        // Check if the entire selection has the target style
+        val hasTargetStyle = checkIfSelectionHasStyle(annotatedString, selectionStart, selectionEnd, styleType)
+
+        val newAnnotatedString = buildAnnotatedString {
+            append(annotatedString)
+
+            if (hasTargetStyle) {
+                // Remove the style from the selection
+                removeStyleFromRange(this, selectionStart, selectionEnd, styleType, annotatedString)
+            } else {
+                // Add the style to the selection
+                addStyleToRange(this, selectionStart, selectionEnd, styleType)
+            }
+        }
+
+        return textFieldValue.copy(
+            annotatedString = newAnnotatedString,
+            selection = selection
+        )
     }
 
+    /**
+     * Handle formatting at cursor position (for future typing)
+     */
+    private fun handleCursorPositionFormatting(textFieldValue: TextFieldValue, styleType: StyleType): TextFieldValue {
+        val cursorPos = textFieldValue.selection.start
+        val annotatedString = textFieldValue.annotatedString
+
+        // Check current styles at cursor position
+        val stylesAtCursor = getStylesAtPosition(annotatedString, cursorPos)
+        val hasStyle = when (styleType) {
+            StyleType.BOLD -> stylesAtCursor.any { it.fontWeight == FontWeight.Bold }
+            StyleType.ITALIC -> stylesAtCursor.any { it.fontStyle == FontStyle.Italic }
+            StyleType.UNDERLINE -> stylesAtCursor.any {
+                it.textDecoration?.contains(TextDecoration.Underline) == true
+            }
+            StyleType.STRIKETHROUGH -> stylesAtCursor.any {
+                it.textDecoration?.contains(TextDecoration.LineThrough) == true
+            }
+        }
+
+        // For cursor position, we'll insert a zero-width character with the style
+        // This is a common technique in rich text editors
+        val targetStyle = createStyleForType(styleType, !hasStyle)
+        val newAnnotatedString = buildAnnotatedString {
+            append(annotatedString)
+
+            if (!hasStyle) {
+                // Add invisible marker for next character
+                addStyle(targetStyle, cursorPos, cursorPos)
+            }
+        }
+
+        return textFieldValue.copy(annotatedString = newAnnotatedString)
+    }
+
+    /**
+     * Check if the entire selection has the specified style
+     */
+    private fun checkIfSelectionHasStyle(
+        annotatedString: AnnotatedString,
+        start: Int,
+        end: Int,
+        styleType: StyleType
+    ): Boolean {
+        val relevantSpans = annotatedString.spanStyles.filter { spanStyle ->
+            spanStyle.start < end && spanStyle.end > start
+        }
+
+        if (relevantSpans.isEmpty()) return false
+
+        // Check if the entire selection is covered by spans with the target style
+        for (pos in start until end) {
+            val spansAtPos = relevantSpans.filter { it.start <= pos && it.end > pos }
+            val hasStyleAtPos = spansAtPos.any { spanStyle ->
+                when (styleType) {
+                    StyleType.BOLD -> spanStyle.item.fontWeight == FontWeight.Bold
+                    StyleType.ITALIC -> spanStyle.item.fontStyle == FontStyle.Italic
+                    StyleType.UNDERLINE -> spanStyle.item.textDecoration?.contains(TextDecoration.Underline) == true
+                    StyleType.STRIKETHROUGH -> spanStyle.item.textDecoration?.contains(TextDecoration.LineThrough) == true
+                }
+            }
+
+            if (!hasStyleAtPos) return false
+        }
+
+        return true
+    }
+
+    /**
+     * Remove style from a specific range while preserving other styles
+     */
+    private fun removeStyleFromRange(
+        builder: AnnotatedString.Builder,
+        start: Int,
+        end: Int,
+        styleType: StyleType,
+        originalString: AnnotatedString
+    ) {
+        // Clear existing styles in the range and re-apply non-target styles
+        val existingSpans = originalString.spanStyles.filter { spanStyle ->
+            spanStyle.start < end && spanStyle.end > start
+        }
+
+        for (spanStyle in existingSpans) {
+            val spanStart = maxOf(spanStyle.start, start)
+            val spanEnd = minOf(spanStyle.end, end)
+
+            if (spanStart < spanEnd) {
+                val modifiedStyle = removeStyleFromSpanStyle(spanStyle.item, styleType)
+                if (modifiedStyle != SpanStyle()) {
+                    builder.addStyle(modifiedStyle, spanStart, spanEnd)
+                }
+            }
+        }
+    }
+
+    /**
+     * Add style to a specific range while preserving existing styles
+     */
+    private fun addStyleToRange(
+        builder: AnnotatedString.Builder,
+        start: Int,
+        end: Int,
+        styleType: StyleType
+    ) {
+        val targetStyle = createStyleForType(styleType, true)
+        builder.addStyle(targetStyle, start, end)
+    }
+
+    /**
+     * Create a SpanStyle for the given style type
+     */
+    private fun createStyleForType(styleType: StyleType, enabled: Boolean): SpanStyle {
+        return when (styleType) {
+            StyleType.BOLD -> SpanStyle(fontWeight = if (enabled) FontWeight.Bold else FontWeight.Normal)
+            StyleType.ITALIC -> SpanStyle(fontStyle = if (enabled) FontStyle.Italic else FontStyle.Normal)
+            StyleType.UNDERLINE -> SpanStyle(textDecoration = if (enabled) TextDecoration.Underline else TextDecoration.None)
+            StyleType.STRIKETHROUGH -> SpanStyle(textDecoration = if (enabled) TextDecoration.LineThrough else TextDecoration.None)
+        }
+    }
+
+    /**
+     * Remove a specific style from a SpanStyle while preserving others
+     */
+    private fun removeStyleFromSpanStyle(spanStyle: SpanStyle, styleType: StyleType): SpanStyle {
+        return when (styleType) {
+            StyleType.BOLD -> spanStyle.copy(fontWeight = FontWeight.Normal)
+            StyleType.ITALIC -> spanStyle.copy(fontStyle = FontStyle.Normal)
+            StyleType.UNDERLINE -> {
+                val currentDecoration = spanStyle.textDecoration
+                val newDecoration = when {
+                    currentDecoration == TextDecoration.Underline -> TextDecoration.None
+                    currentDecoration == TextDecoration.combine(listOf(TextDecoration.Underline, TextDecoration.LineThrough)) ->
+                        TextDecoration.LineThrough
+                    else -> currentDecoration
+                }
+                spanStyle.copy(textDecoration = newDecoration)
+            }
+            StyleType.STRIKETHROUGH -> {
+                val currentDecoration = spanStyle.textDecoration
+                val newDecoration = when {
+                    currentDecoration == TextDecoration.LineThrough -> TextDecoration.None
+                    currentDecoration == TextDecoration.combine(listOf(TextDecoration.Underline, TextDecoration.LineThrough)) ->
+                        TextDecoration.Underline
+                    else -> currentDecoration
+                }
+                spanStyle.copy(textDecoration = newDecoration)
+            }
+        }
+    }
+
+    /**
+     * Get all styles that apply at a specific position
+     */
+    private fun getStylesAtPosition(annotatedString: AnnotatedString, position: Int): List<SpanStyle> {
+        return annotatedString.spanStyles
+            .filter { it.start <= position && it.end > position }
+            .map { it.item }
+    }
+
+    /**
+     * Apply color formatting with better preservation of existing styles
+     */
     fun formatColor(textFieldValue: TextFieldValue, color: Color): TextFieldValue {
         val selection = textFieldValue.selection
-        if (selection.collapsed && textFieldValue.composition == null) return textFieldValue
+        if (selection.collapsed && textFieldValue.composition == null) {
+            // Handle cursor position coloring
+            return handleCursorColorFormatting(textFieldValue, color)
+        }
 
         val newAnnotatedString = buildAnnotatedString {
             append(textFieldValue.annotatedString)
             addStyle(SpanStyle(color = color), selection.min, selection.max)
         }
+
         return textFieldValue.copy(annotatedString = newAnnotatedString, selection = selection)
     }
 
+    /**
+     * Handle color formatting at cursor position
+     */
+    private fun handleCursorColorFormatting(textFieldValue: TextFieldValue, color: Color): TextFieldValue {
+        val cursorPos = textFieldValue.selection.start
+        val newAnnotatedString = buildAnnotatedString {
+            append(textFieldValue.annotatedString)
+            // Add color style for next character typed
+            addStyle(SpanStyle(color = color), cursorPos, cursorPos)
+        }
+
+        return textFieldValue.copy(annotatedString = newAnnotatedString)
+    }
+
+    /**
+     * Improved link application that preserves formatting
+     */
     fun applyLink(textFieldValue: TextFieldValue, url: String, text: String, selection: TextRange): TextFieldValue {
         val currentAnnotatedString = textFieldValue.annotatedString
         val currentText = currentAnnotatedString.text
 
-        // Create a new AnnotatedString
         val newAnnotatedString = buildAnnotatedString {
-            // Handle text insertion or replacement
             if (selection.collapsed) {
-                // Insert mode - insert the text at the current position
+                // Insert link at cursor position
                 val insertPosition = selection.start.coerceIn(0, currentText.length)
-
-                // Split the original text at the insertion point
                 val beforeText = currentText.substring(0, insertPosition)
                 val afterText = currentText.substring(insertPosition)
 
-                // Append text before the insertion, the new link text, and text after
                 append(beforeText)
                 append(text)
                 append(afterText)
 
-                // Apply styling and URL annotation to the inserted link text
+                // Apply link styling
                 addStringAnnotation("URL", url, beforeText.length, beforeText.length + text.length)
                 addStyle(
                     SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline),
@@ -180,73 +279,20 @@ object RichTextFormatter {
                     beforeText.length + text.length
                 )
 
-                // Copy over existing span styles, adjusting positions for text after insertion
-                currentAnnotatedString.spanStyles.forEach { span ->
-                    if (span.start < insertPosition) {
-                        // Style is before insertion point - copy as is
-                        if (span.end <= insertPosition) {
-                            addStyle(span.item, span.start, span.end)
-                        } else {
-                            // Style spans across the insertion point
-                            addStyle(span.item, span.start, span.end + text.length)
-                        }
-                    } else {
-                        // Style is after insertion point - shift position
-                        addStyle(span.item, span.start + text.length, span.end + text.length)
-                    }
-                }
-
-                // Copy over paragraph styles with adjusted positions
-                currentAnnotatedString.paragraphStyles.forEach { para ->
-                    if (para.start < insertPosition) {
-                        // Paragraph style is before insertion point
-                        if (para.end <= insertPosition) {
-                            addStyle(para.item, para.start, para.end)
-                        } else {
-                            // Paragraph style spans across the insertion point
-                            addStyle(para.item, para.start, para.end + text.length)
-                        }
-                    } else {
-                        // Paragraph style is after insertion point - shift position
-                        addStyle(para.item, para.start + text.length, para.end + text.length)
-                    }
-                }
-
-                // Copy URL annotations with adjusted positions
-                for (annotationType in currentAnnotatedString.getStringAnnotations(0, currentText.length)
-                    .map { it.tag }
-                    .toSet()) {
-
-                    currentAnnotatedString.getStringAnnotations(annotationType, 0, currentText.length).forEach { annotation ->
-                        if (annotation.start < insertPosition) {
-                            // Annotation is before insertion point
-                            if (annotation.end <= insertPosition) {
-                                addStringAnnotation(annotation.tag, annotation.item, annotation.start, annotation.end)
-                            } else {
-                                // Annotation spans across insertion point
-                                addStringAnnotation(annotation.tag, annotation.item, annotation.start, annotation.end + text.length)
-                            }
-                        } else {
-                            // Annotation is after insertion point - shift position
-                            addStringAnnotation(annotation.tag, annotation.item, annotation.start + text.length, annotation.end + text.length)
-                        }
-                    }
-                }
+                // Preserve existing styles with position adjustments
+                preserveExistingStyles(this, currentAnnotatedString, insertPosition, text.length, true)
             } else {
-                // Replace mode - replace the selected text with the link text
+                // Replace selected text with link
                 val replaceStart = selection.min.coerceIn(0, currentText.length)
                 val replaceEnd = selection.max.coerceIn(0, currentText.length)
-
-                // Split the original text at the selection boundaries
                 val beforeSelection = currentText.substring(0, replaceStart)
                 val afterSelection = currentText.substring(replaceEnd)
 
-                // Append text before the selection, the new link text, and text after
                 append(beforeSelection)
                 append(text)
                 append(afterSelection)
 
-                // Apply styling and URL annotation to the link text
+                // Apply link styling
                 addStringAnnotation("URL", url, beforeSelection.length, beforeSelection.length + text.length)
                 addStyle(
                     SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline),
@@ -254,78 +300,150 @@ object RichTextFormatter {
                     beforeSelection.length + text.length
                 )
 
-                // Copy over existing span styles, adjusting positions for the replacement
-                currentAnnotatedString.spanStyles.forEach { span ->
-                    if (span.end <= replaceStart) {
-                        // Style is completely before the selection - copy as is
-                        addStyle(span.item, span.start, span.end)
-                    } else if (span.start >= replaceEnd) {
-                        // Style is completely after the selection - adjust position
-                        val shift = text.length - (replaceEnd - replaceStart)
-                        addStyle(span.item, span.start + shift, span.end + shift)
-                    } else if (span.start < replaceStart && span.end > replaceEnd) {
-                        // Style spans the entire selection - adjust end position
-                        val newEnd = span.end - (replaceEnd - replaceStart) + text.length
-                        addStyle(span.item, span.start, newEnd)
-                    }
-                    // If style is partially within selection, we don't copy it
-                }
-
-                // Copy over paragraph styles with adjusted positions
-                currentAnnotatedString.paragraphStyles.forEach { para ->
-                    if (para.end <= replaceStart) {
-                        // Paragraph style is completely before the selection
-                        addStyle(para.item, para.start, para.end)
-                    } else if (para.start >= replaceEnd) {
-                        // Paragraph style is completely after the selection
-                        val shift = text.length - (replaceEnd - replaceStart)
-                        addStyle(para.item, para.start + shift, para.end + shift)
-                    } else if (para.start < replaceStart && para.end > replaceEnd) {
-                        // Paragraph style spans the entire selection
-                        val newEnd = para.end - (replaceEnd - replaceStart) + text.length
-                        addStyle(para.item, para.start, newEnd)
-                    }
-                    // If paragraph style is partially within selection, we don't copy it
-                }
-
-                // Copy URL annotations with adjusted positions
-                for (annotationType in currentAnnotatedString.getStringAnnotations(0, currentText.length)
-                    .map { it.tag }
-                    .toSet()) {
-
-                    currentAnnotatedString.getStringAnnotations(annotationType, 0, currentText.length).forEach { annotation ->
-                        if (annotation.end <= replaceStart) {
-                            // Annotation is completely before the selection
-                            addStringAnnotation(annotation.tag, annotation.item, annotation.start, annotation.end)
-                        } else if (annotation.start >= replaceEnd) {
-                            // Annotation is completely after the selection
-                            val shift = text.length - (replaceEnd - replaceStart)
-                            addStringAnnotation(annotation.tag, annotation.item, annotation.start + shift, annotation.end + shift)
-                        } else if (annotation.start < replaceStart && annotation.end > replaceEnd) {
-                            // Annotation spans the entire selection
-                            val newEnd = annotation.end - (replaceEnd - replaceStart) + text.length
-                            addStringAnnotation(annotation.tag, annotation.item, annotation.start, newEnd)
-                        }
-                        // If annotation is partially within selection, we don't copy it
-                    }
-                }
+                // Preserve existing styles with replacement adjustments
+                preserveExistingStylesForReplacement(this, currentAnnotatedString, replaceStart, replaceEnd, text.length)
             }
         }
 
-        // Create a new selection at the end of the inserted link
         val newCursorPosition = if (selection.collapsed) {
             selection.start + text.length
         } else {
             selection.min + text.length
         }
-        val newSelection = TextRange(newCursorPosition)
 
         return TextFieldValue(
             annotatedString = newAnnotatedString,
-            selection = newSelection
+            selection = TextRange(newCursorPosition)
         )
     }
 
+    /**
+     * Preserve existing styles when inserting text
+     */
+    private fun preserveExistingStyles(
+        builder: AnnotatedString.Builder,
+        original: AnnotatedString,
+        insertPosition: Int,
+        insertLength: Int,
+        isInsertion: Boolean
+    ) {
+        // Preserve span styles
+        original.spanStyles.forEach { span ->
+            when {
+                span.end <= insertPosition -> {
+                    // Style is before insertion - copy as is
+                    builder.addStyle(span.item, span.start, span.end)
+                }
+                span.start >= insertPosition -> {
+                    // Style is after insertion - shift position
+                    builder.addStyle(span.item, span.start + insertLength, span.end + insertLength)
+                }
+                else -> {
+                    // Style spans across insertion point
+                    builder.addStyle(span.item, span.start, span.end + insertLength)
+                }
+            }
+        }
+
+        // Preserve paragraph styles
+        original.paragraphStyles.forEach { para ->
+            when {
+                para.end <= insertPosition -> {
+                    builder.addStyle(para.item, para.start, para.end)
+                }
+                para.start >= insertPosition -> {
+                    builder.addStyle(para.item, para.start + insertLength, para.end + insertLength)
+                }
+                else -> {
+                    builder.addStyle(para.item, para.start, para.end + insertLength)
+                }
+            }
+        }
+
+        // Preserve string annotations
+        for (annotation in original.getStringAnnotations(0, original.text.length)) {
+            when {
+                annotation.end <= insertPosition -> {
+                    builder.addStringAnnotation(annotation.tag, annotation.item, annotation.start, annotation.end)
+                }
+                annotation.start >= insertPosition -> {
+                    builder.addStringAnnotation(annotation.tag, annotation.item,
+                        annotation.start + insertLength, annotation.end + insertLength)
+                }
+                else -> {
+                    builder.addStringAnnotation(annotation.tag, annotation.item,
+                        annotation.start, annotation.end + insertLength)
+                }
+            }
+        }
+    }
+
+    /**
+     * Preserve existing styles when replacing text
+     */
+    private fun preserveExistingStylesForReplacement(
+        builder: AnnotatedString.Builder,
+        original: AnnotatedString,
+        replaceStart: Int,
+        replaceEnd: Int,
+        newTextLength: Int
+    ) {
+        val lengthDiff = newTextLength - (replaceEnd - replaceStart)
+
+        // Preserve span styles
+        original.spanStyles.forEach { span ->
+            when {
+                span.end <= replaceStart -> {
+                    // Style is completely before replacement
+                    builder.addStyle(span.item, span.start, span.end)
+                }
+                span.start >= replaceEnd -> {
+                    // Style is completely after replacement
+                    builder.addStyle(span.item, span.start + lengthDiff, span.end + lengthDiff)
+                }
+                span.start < replaceStart && span.end > replaceEnd -> {
+                    // Style spans the entire replacement
+                    builder.addStyle(span.item, span.start, span.end + lengthDiff)
+                }
+                // Skip styles that are partially within the replacement
+            }
+        }
+
+        // Similar logic for paragraph styles and annotations
+        original.paragraphStyles.forEach { para ->
+            when {
+                para.end <= replaceStart -> {
+                    builder.addStyle(para.item, para.start, para.end)
+                }
+                para.start >= replaceEnd -> {
+                    builder.addStyle(para.item, para.start + lengthDiff, para.end + lengthDiff)
+                }
+                para.start < replaceStart && para.end > replaceEnd -> {
+                    builder.addStyle(para.item, para.start, para.end + lengthDiff)
+                }
+            }
+        }
+
+        for (annotation in original.getStringAnnotations(0, original.text.length)) {
+            when {
+                annotation.end <= replaceStart -> {
+                    builder.addStringAnnotation(annotation.tag, annotation.item, annotation.start, annotation.end)
+                }
+                annotation.start >= replaceEnd -> {
+                    builder.addStringAnnotation(annotation.tag, annotation.item,
+                        annotation.start + lengthDiff, annotation.end + lengthDiff)
+                }
+                annotation.start < replaceStart && annotation.end > replaceEnd -> {
+                    builder.addStringAnnotation(annotation.tag, annotation.item,
+                        annotation.start, annotation.end + lengthDiff)
+                }
+            }
+        }
+    }
+
+    /**
+     * Toggle paragraph style with better handling
+     */
     fun toggleParagraphStyle(textFieldValue: TextFieldValue, styleType: ParagraphStyleType): TextFieldValue {
         val selection = textFieldValue.selection
         val currentAnnotatedString = textFieldValue.annotatedString
@@ -347,43 +465,55 @@ object RichTextFormatter {
 
         val newAnnotatedString = buildAnnotatedString {
             append(currentAnnotatedString)
+
             val styleToToggle = when (styleType) {
                 ParagraphStyleType.BLOCKQUOTE -> ParagraphStyle(textIndent = TextIndent(16.sp, 16.sp))
             }
 
-            // Check if style is already applied
+            // Check if style is already applied to the paragraph
             val existingStyles = currentAnnotatedString.paragraphStyles.filter { range ->
                 maxOf(range.start, paraStart) < minOf(range.end, paraEnd)
             }
+
             val styleAlreadyApplied = existingStyles.any { range ->
                 range.item.textIndent == styleToToggle.textIndent
             }
 
             // Toggle the style
             if (styleAlreadyApplied) {
+                // Remove the style by applying empty paragraph style
                 addStyle(ParagraphStyle(), paraStart, paraEnd)
             } else {
+                // Apply the style
                 addStyle(styleToToggle, paraStart, paraEnd)
             }
         }
+
         return textFieldValue.copy(annotatedString = newAnnotatedString, selection = selection)
     }
 
+    /**
+     * Utility functions for markdown processing
+     */
     fun fixMarkdownErrors(markdownContent: String): String {
-        Log.d("RichTextFormatter", "Fixing markdown (stub): $markdownContent")
+        Log.d("RichTextFormatter", "Fixing markdown errors in content")
         return markdownContent
+            .replace(Regex("""\*\*\*\*(.*?)\*\*\*\*"""), "**$1**") // Fix quadruple asterisks
+            .replace(Regex("""_____(.*?)_____"""), "_$1_") // Fix quintuple underscores
+            .replace(Regex("""\n\n\n+"""), "\n\n") // Fix excessive line breaks
     }
 
     fun stripMarkdown(markdownContent: String): String {
-        Log.d("RichTextFormatter", "Stripping markdown (stub): $markdownContent")
-        var text = markdownContent
-        text = text.replace(Regex("""\*\*(.*?)\*\*"""), "$1")
-        text = text.replace(Regex("""\*(.*?)\*"""), "$1")
-        text = text.replace(Regex("""__(.*?)__"""), "$1")
-        text = text.replace(Regex("""~~(.*?)~~"""), "$1")
-        text = text.replace(Regex("""^#+\s*(.*)""", RegexOption.MULTILINE), "$1")
-        text = text.replace(Regex("""\[(.*?)\]\(.*?\)"""), "$1")
-        text = text.replace(Regex("""\!\[(.*?)\]\(.*?\)"""), "$1")
-        return text
+        Log.d("RichTextFormatter", "Stripping markdown from content")
+        return markdownContent
+            .replace(Regex("""\*\*(.*?)\*\*"""), "$1") // Remove bold
+            .replace(Regex("""\*(.*?)\*"""), "$1") // Remove italic
+            .replace(Regex("""__(.*?)__"""), "$1") // Remove underline
+            .replace(Regex("""~~(.*?)~~"""), "$1") // Remove strikethrough
+            .replace(Regex("""^#+\s*(.*)""", RegexOption.MULTILINE), "$1") // Remove headers
+            .replace(Regex("""\[(.*?)\]\(.*?\)"""), "$1") // Remove links, keep text
+            .replace(Regex("""\!\[(.*?)\]\(.*?\)"""), "$1") // Remove images, keep alt text
+            .replace(Regex("""`(.*?)`"""), "$1") // Remove inline code
+            .replace(Regex("""^>\s*(.*)""", RegexOption.MULTILINE), "$1") // Remove blockquotes
     }
 }
